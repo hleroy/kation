@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-02
+
 Initial release; its scope is in [ROADMAP.md](ROADMAP.md).
 
 ### Added
@@ -23,4 +25,5 @@ Initial release; its scope is in [ROADMAP.md](ROADMAP.md).
 - Debian, Fedora and Arch packages: `./build-package.sh` builds one for the distribution it runs on.
 - GitHub releases come with packages for Debian 13, Fedora 43 and Arch Linux.
 
-[Unreleased]: https://github.com/hleroy/kation/commits/main
+[Unreleased]: https://github.com/hleroy/kation/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/hleroy/kation/releases/tag/v0.1.0
