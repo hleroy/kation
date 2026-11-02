@@ -1,0 +1,30 @@
+{
+    "permissions": {
+        "allow": [
+            "Bash(cmake:*)",
+            "Bash(ctest:*)",
+            "Bash(cpack:*)",
+            "Bash(bun test:*)",
+            "Bash(bun x tsc:*)",
+            "Bash(bun x biome:*)",
+            "Bash(pre-commit run:*)",
+            "Bash(./build-package.sh:*)",
+            "Bash(po/update.sh:*)",
+            "Bash(./po/update.sh:*)",
+            "Bash(msgfmt:*)",
+            "Bash(dpkg-deb:*)"
+        ],
+        "deny": [
+            "Bash(sudo:*)",
+            "Read(~/.ssh/**)",
+            "Edit(~/.ssh/**)",
+            "Read(~/.aws/**)",
+            "Read(**/.env)",
+            "Edit(**/.env)",
+            "Read(**/.git/config)",
+            "Edit(~/.bashrc)",
+            "Edit(~/.profile)",
+            "Edit(/etc/**)"
+        ]
+    }
+}

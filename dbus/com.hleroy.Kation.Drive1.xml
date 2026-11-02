@@ -1,0 +1,224 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<!--
+  SPDX-FileCopyrightText: 2026 Kation contributors
+  SPDX-License-Identifier: GPL-2.0-or-later
+
+  Interface between kationd and the KDE components. It is private to Kation
+  and may change between versions; the "1" in the name is bumped on
+  incompatible changes.
+
+  Paths are POSIX paths inside "My files", e.g. "/Documents/report.pdf".
+  "/" is the root of "My files".
+
+  Entries (a{sv}) contain:
+    name      s  File or folder name ("" for the root)
+    type      s  "file" or "folder"
+    size      x  Size in bytes, -1 if unknown (always -1 for folders)
+    mtime     x  Modification time, seconds since the epoch
+    ctime     x  Creation time, seconds since the epoch
+    mimeType  s  Media type ("inode/directory" for folders)
+
+  Errors are named com.hleroy.Kation.Error.<Code> with Code one of:
+    NotLoggedIn, NotFound, AlreadyExists, NotAFolder, IsAFolder,
+    InvalidArgument, RateLimited, Connection, Integrity, Cancelled, Failed
+  The error message is human readable.
+-->
+<node>
+  <interface name="com.hleroy.Kation.Drive1">
+    <!--
+      Status (a{sv}): loggedIn b, email s, loginPending b, signInUrl s,
+      appVersion s, sdkVersion s, problem s (why Kation cannot work right
+      now, in English; empty if none), problemCode s (the same as a code:
+      "keyring" when the keyring cannot keep you signed in, "sessionLost"
+      when Proton ended the session, "" if none), problemDetail s (the
+      underlying error, or "").
+    -->
+    <method name="GetStatus">
+      <arg name="status" type="a{sv}" direction="out"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMap"/>
+    </method>
+
+    <!--
+      Starts the browser sign-in and returns the URL to open. Calling it
+      again while a sign-in is pending returns the same URL. The outcome is
+      reported by LoginFinished.
+    -->
+    <method name="StartLogin">
+      <arg name="signInUrl" type="s" direction="out"/>
+    </method>
+    <method name="CancelLogin"/>
+
+    <!-- Ends the session on Proton's servers and deletes local data. -->
+    <method name="Logout"/>
+
+    <method name="Stat">
+      <arg name="path" type="s" direction="in"/>
+      <arg name="entry" type="a{sv}" direction="out"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMap"/>
+    </method>
+
+    <method name="List">
+      <arg name="path" type="s" direction="in"/>
+      <arg name="entries" type="aa{sv}" direction="out"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMapList"/>
+    </method>
+
+    <method name="CreateFolder">
+      <arg name="path" type="s" direction="in"/>
+    </method>
+
+    <!-- Renames and/or moves. With overwrite, an existing destination is moved to the trash first. -->
+    <method name="Move">
+      <arg name="source" type="s" direction="in"/>
+      <arg name="destination" type="s" direction="in"/>
+      <arg name="overwrite" type="b" direction="in"/>
+    </method>
+
+    <!-- Moves a file or folder to the Proton Drive trash. -->
+    <method name="Trash">
+      <arg name="path" type="s" direction="in"/>
+    </method>
+
+    <!--
+      Downloads a file to localPath (an absolute path, replaced if it
+      exists). transferId is chosen by the caller and identifies the
+      TransferProgress signals and CancelTransfer. A transfer is also
+      cancelled when its caller disconnects from the bus.
+    -->
+    <method name="Download">
+      <arg name="path" type="s" direction="in"/>
+      <arg name="localPath" type="s" direction="in"/>
+      <arg name="transferId" type="s" direction="in"/>
+      <arg name="entry" type="a{sv}" direction="out"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMap"/>
+    </method>
+
+    <!-- Uploads localPath to path. With overwrite, an existing file gets a new revision. -->
+    <method name="Upload">
+      <arg name="localPath" type="s" direction="in"/>
+      <arg name="path" type="s" direction="in"/>
+      <arg name="overwrite" type="b" direction="in"/>
+      <arg name="transferId" type="s" direction="in"/>
+      <arg name="entry" type="a{sv}" direction="out"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMap"/>
+    </method>
+
+    <method name="CancelTransfer">
+      <arg name="transferId" type="s" direction="in"/>
+    </method>
+
+    <!--
+      Sync of a local folder with "My files".
+      Sync status (a{sv}): enabled b, paused b, folder s (absolute path),
+      excluded as (folders in "My files" not synced), state s ("disabled",
+      "idle", "syncing", "paused" or "error"), message s (error or reason for
+      a pause, in English), reason s (why sync is paused or cannot run, as a
+      code: "user" paused by the user, "deletions" more than deletionLimit
+      items would be deleted at once, "folder" the sync folder is missing or
+      was replaced, "account" signed in to another account than the folder's,
+      "signedOut" sync is on but nobody is signed in, "items" some items
+      could not be synced, "" see message), deletionLimit u, current s (path
+      being transferred), pending u (folders waiting), lastSync x (seconds
+      since the epoch, 0 if never),
+      uploadLimit u, downloadLimit u (KiB/s for all transfers, 0: unlimited).
+    -->
+    <method name="GetSyncStatus">
+      <arg name="status" type="a{sv}" direction="out"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMap"/>
+    </method>
+    <!-- Turning sync on requires being signed in; turning it off keeps the files. -->
+    <method name="SetSyncEnabled">
+      <arg name="enabled" type="b" direction="in"/>
+    </method>
+    <!-- Resuming after a safety pause (mass deletion) confirms the deletions. -->
+    <method name="SetSyncPaused">
+      <arg name="paused" type="b" direction="in"/>
+    </method>
+    <!-- Only while sync is off. A different folder starts a fresh sync. -->
+    <method name="SetSyncFolder">
+      <arg name="folder" type="s" direction="in"/>
+    </method>
+    <method name="SetExcludedFolders">
+      <arg name="paths" type="as" direction="in"/>
+    </method>
+    <!-- Scans the local folder now; remote changes arrive by themselves. -->
+    <method name="SyncNow"/>
+    <!-- Speed limits in KiB/s for all transfers (sync and online view); 0 means unlimited. -->
+    <method name="SetBandwidthLimits">
+      <arg name="upload" type="u" direction="in"/>
+      <arg name="download" type="u" direction="in"/>
+    </method>
+
+    <!--
+      What sync did recently, most recent first (at most 50, since kationd
+      started). Activity (a{sv}): time x (seconds since the epoch), kind s
+      ("uploaded", "downloaded", "trashedRemote" (deleted locally, moved to
+      the Proton trash), "trashedLocal" (deleted on Proton, moved to the
+      desktop Trash), "conflict" or "error"), path s (in "My files"),
+      localPath s, detail s (conflict: the copy kept, as a path in "My files";
+      error: the message).
+    -->
+    <method name="GetRecentActivity">
+      <arg name="activity" type="aa{sv}" direction="out"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMapList"/>
+    </method>
+    <signal name="SyncActivity">
+      <arg name="activity" type="a{sv}"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMap"/>
+    </signal>
+
+    <!--
+      Sync state of local files and folders (absolute paths), for overlay
+      icons: "synced", "syncing", "pending", "paused", "error", "excluded",
+      or "" (not in the sync folder, sync off, or never synced such as
+      temporary files). Answers from local data only, so it is cheap.
+    -->
+    <method name="GetItemStates">
+      <arg name="localPaths" type="as" direction="in"/>
+      <arg name="states" type="a{sv}" direction="out"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMap"/>
+    </method>
+    <!-- The states of these local paths may have changed; empty means any path. -->
+    <signal name="ItemStatesChanged">
+      <arg name="localPaths" type="as"/>
+    </signal>
+
+    <!--
+      Links for a file or folder given as a URL: protondrive:/path, or a
+      file:// URL inside the sync folder (while sync is on).
+      GetShareLink returns its public link, "" if it has none; with create,
+      makes one first (anyone with the link can view the item).
+      GetWebUrl returns its address in the Proton Drive web app.
+    -->
+    <method name="GetShareLink">
+      <arg name="url" type="s" direction="in"/>
+      <arg name="create" type="b" direction="in"/>
+      <arg name="link" type="s" direction="out"/>
+    </method>
+    <method name="GetWebUrl">
+      <arg name="url" type="s" direction="in"/>
+      <arg name="webUrl" type="s" direction="out"/>
+    </method>
+
+    <signal name="SyncStatusChanged">
+      <arg name="status" type="a{sv}"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMap"/>
+    </signal>
+
+    <signal name="StatusChanged">
+      <arg name="status" type="a{sv}"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QVariantMap"/>
+    </signal>
+
+    <signal name="LoginFinished">
+      <arg name="success" type="b"/>
+      <arg name="message" type="s"/>
+    </signal>
+
+    <signal name="TransferProgress">
+      <arg name="transferId" type="s"/>
+      <arg name="bytes" type="t"/>
+    </signal>
+  </interface>
+</node>

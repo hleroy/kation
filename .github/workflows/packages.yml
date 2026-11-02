@@ -1,0 +1,154 @@
+# SPDX-FileCopyrightText: 2026 Kation contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# The .deb, .rpm and Arch packages from ./build-package.sh, each built,
+# installed and checked on its distribution, then uploaded as an artifact.
+# Called by ci.yml (pull requests) and release.yml (version tags).
+name: Packages
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # The .deb from ./build-package.sh, built, installed and checked on Debian 13.
+  # It targets Debian 13 only: it does not install on older bases such as Ubuntu
+  # 24.04 (glibc 2.41 > 2.39), where ./build-package.sh must be run locally.
+  deb:
+    name: Debian package (Debian 13)
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends \
+            ca-certificates git unzip cmake g++ make extra-cmake-modules dpkg-dev file gettext \
+            qt6-base-dev libkf6kio-dev libkf6coreaddons-dev libkf6i18n-dev libkf6config-dev \
+            libkf6dbusaddons-dev libkf6kcmutils-dev libkf6notifications-dev \
+            libkf6statusnotifieritem-dev libkf6windowsystem-dev
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+      - name: Trust the checkout
+        run: git config --global --add safe.directory '*'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: daemon/.bun-version
+      - name: Build the package
+        run: ./build-package.sh
+      - name: Install the package
+        run: apt-get install -y -q ./dist/kation_*.deb
+      - name: Check the installed files
+        run: |
+          for path in /usr/bin/kation /usr/bin/kationd \
+              /usr/share/dbus-1/services/com.hleroy.Kation.service \
+              /usr/lib/systemd/user/kationd.service \
+              /usr/share/knotifications6/kation.notifyrc \
+              /usr/share/icons/hicolor/scalable/status/kation-tray.svg \
+              /usr/share/locale/fr/LC_MESSAGES/kation.mo; do
+            dpkg -S "$path"
+          done
+          for plugin in kio_protondrive kcm_kation kationoverlay kationfileitemaction; do
+            dpkg -L kation | grep -q "/$plugin.so$" || { echo "missing $plugin.so"; exit 1; }
+          done
+          kationd version
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kation-debian13-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  # The .rpm from ./build-package.sh, built, installed and checked on Fedora 43.
+  rpm:
+    name: RPM package (Fedora 43)
+    runs-on: ubuntu-24.04
+    container: fedora:43
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf -y -q install --setopt=install_weak_deps=False \
+            git unzip cmake gcc-c++ make extra-cmake-modules gettext rpm-build \
+            qt6-qtbase-devel kf6-kio-devel kf6-kcoreaddons-devel kf6-ki18n-devel kf6-kconfig-devel \
+            kf6-kdbusaddons-devel kf6-kcmutils-devel kf6-knotifications-devel \
+            kf6-kstatusnotifieritem-devel kf6-kwindowsystem-devel
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+      - name: Trust the checkout
+        run: git config --global --add safe.directory '*'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: daemon/.bun-version
+      # A desktop user's umask on Fedora: the package must still install.
+      - name: Build the package
+        run: umask 002 && ./build-package.sh
+      - name: Install the package
+        run: dnf -y -q install ./dist/kation-*.rpm
+      - name: Check the installed files
+        run: |
+          for path in /usr/bin/kation /usr/bin/kationd \
+              /usr/share/dbus-1/services/com.hleroy.Kation.service \
+              /usr/lib/systemd/user/kationd.service \
+              /usr/share/knotifications6/kation.notifyrc \
+              /usr/share/icons/hicolor/scalable/status/kation-tray.svg \
+              /usr/share/locale/fr/LC_MESSAGES/kation.mo; do
+            rpm -qf "$path"
+          done
+          for plugin in kio_protondrive kcm_kation kationoverlay kationfileitemaction; do
+            rpm -ql kation | grep -q "/$plugin.so$" || { echo "missing $plugin.so"; exit 1; }
+          done
+          kationd version
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kation-fedora43-rpm
+          path: dist/*.rpm
+          if-no-files-found: error
+
+  # The Arch package from ./build-package.sh, built, installed and checked. Bun
+  # comes from the Arch repositories, as an Arch user would install it.
+  arch:
+    name: Arch package
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel git cmake extra-cmake-modules gettext bun \
+            qt6-base kio kcoreaddons ki18n kconfig kdbusaddons kcmutils knotifications \
+            kstatusnotifieritem kwindowsystem libsecret
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+      # makepkg refuses to run as root.
+      - name: Create a build user
+        run: |
+          useradd -m builder
+          chown -R builder .
+      - name: Build the package
+        run: su builder -c ./build-package.sh
+      - name: Install the package
+        run: pacman -U --noconfirm dist/kation-*.pkg.tar.zst
+      - name: Check the installed files
+        run: |
+          for path in /usr/bin/kation /usr/bin/kationd \
+              /usr/share/dbus-1/services/com.hleroy.Kation.service \
+              /usr/lib/systemd/user/kationd.service \
+              /usr/share/knotifications6/kation.notifyrc \
+              /usr/share/icons/hicolor/scalable/status/kation-tray.svg \
+              /usr/share/locale/fr/LC_MESSAGES/kation.mo \
+              /usr/share/licenses/kation/MIT.txt; do
+            pacman -Qo "$path"
+          done
+          for plugin in kio_protondrive kcm_kation kationoverlay kationfileitemaction; do
+            pacman -Qlq kation | grep -q "/$plugin.so$" || { echo "missing $plugin.so"; exit 1; }
+          done
+          kationd version
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kation-arch-pkg
+          path: dist/*.pkg.tar.zst
+          if-no-files-found: error

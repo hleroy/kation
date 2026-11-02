@@ -1,0 +1,546 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the kation package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: kation 0.1.0\n"
+"Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
+"POT-Creation-Date: 2026-11-01 23:03+0100\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
+
+#: kde/app/main.cpp kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Kation"
+msgstr ""
+
+#: kde/app/main.cpp
+#, kde-format
+msgid "Unofficial Proton Drive client for KDE Plasma"
+msgstr ""
+
+#: kde/app/main.cpp
+#, kde-format
+msgid "© 2026 Kation contributors"
+msgstr ""
+
+#: kde/app/main.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "This is a third-party application not officially supported by Proton."
+msgstr ""
+
+#: kde/app/main.cpp
+#, kde-format
+msgid "Start in the system tray without opening the window"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgctxt "recent activity"
+msgid "Uploaded %1"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgctxt "recent activity"
+msgid "Downloaded %1"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgctxt "recent activity"
+msgid "Moved %1 to the Proton Drive trash"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgctxt "recent activity"
+msgid "Moved %1 to the Trash"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgctxt "recent activity"
+msgid "Kept both versions of %1"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgctxt "recent activity"
+msgid "Could not sync %1"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Sign In…"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Open Synced Folder"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Open Online View"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Sync Now"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Recent Activity"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Settings…"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Signed out of Proton Drive"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Open Settings"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Some files could not be synced"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Sync paused"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid ""
+"%1 was changed both here and in Proton Drive. Both versions are kept; your "
+"version was renamed with “conflict” in its name."
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "%1 file was changed both here and in Proton Drive."
+msgid_plural "%1 files were changed both here and in Proton Drive."
+msgstr[0] ""
+msgstr[1] ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid ""
+"Both versions are kept; yours were renamed with “conflict” in their names."
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Kept both versions"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Show in Folder"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "The Kation background service is not available"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Not signed in"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Waiting for sign-in…"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Sync is off"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Syncing %1…"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Syncing…"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Sync paused: %1"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Problem: %1"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Up to date"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Starting…"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Pause Sync"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Resume Sync"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Nothing synced yet"
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"More than one item would be deleted at once. Check the sync folder, then "
+"resume sync to continue."
+msgid_plural ""
+"More than %1 items would be deleted at once. Check the sync folder, then "
+"resume sync to continue."
+msgstr[0] ""
+msgstr[1] ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"The sync folder %1 is missing or was replaced. Restore it and sync resumes "
+"by itself, or turn sync off and on again to start over."
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"You are signed in to a different Proton account than the one this folder was "
+"synced with. Turn sync off and on again to sync this folder with the current "
+"account instead."
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid "Sign in to sync."
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid "Some items could not be synced."
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"Kation cannot use your keyring to keep you signed in. On Plasma, enable "
+"System Settings → KDE Wallet → “Use KWallet for the Secret Service "
+"interface”, then try again."
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"Your Proton session ended (it expired or was signed out elsewhere). Sign in "
+"again to continue."
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgctxt "@info a problem, then the error behind it"
+msgid "%1 (%2)"
+msgstr ""
+
+#: kde/dolphin/fileitemaction.cpp
+#, kde-format
+msgid "Proton Drive"
+msgstr ""
+
+#: kde/dolphin/fileitemaction.cpp
+#, kde-format
+msgid "Copy Public Link"
+msgstr ""
+
+#: kde/dolphin/fileitemaction.cpp
+#, kde-format
+msgid "Open in Proton Drive Website"
+msgstr ""
+
+#: kde/dolphin/fileitemaction.cpp
+#, kde-format
+msgid "Create a Public Link?"
+msgstr ""
+
+#: kde/dolphin/fileitemaction.cpp
+#, kde-format
+msgid ""
+"“%1” has no public link yet. Anyone who has the link will be able to view "
+"it. You can remove the link in the Proton Drive website."
+msgstr ""
+
+#: kde/dolphin/fileitemaction.cpp
+#, kde-format
+msgid "Public link copied"
+msgstr ""
+
+#: kde/dolphin/fileitemaction.cpp
+#, kde-format
+msgid "Public link created"
+msgstr ""
+
+#: kde/dolphin/fileitemaction.cpp
+#, kde-format
+msgid "The link to “%1” is in the clipboard."
+msgstr ""
+
+#: kde/kioworker/errors.cpp
+#, kde-format
+msgid "The Kation background service is not available (%1)."
+msgstr ""
+
+#: kde/kioworker/errors.cpp
+#, kde-format
+msgid "You are not signed in to Proton Drive. Open Kation to sign in."
+msgstr ""
+
+#: kde/kioworker/errors.cpp
+#, kde-format
+msgid ""
+"Proton Drive is limiting requests from this device. Please try again in a "
+"few minutes."
+msgstr ""
+
+#: kde/kioworker/errors.cpp
+#, kde-format
+msgid "The file failed an integrity check: %1"
+msgstr ""
+
+#: kde/kioworker/protondriveworker.cpp
+#, kde-format
+msgid "My files"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Cancel"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Sign Out"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Open Files"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Copy Link"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Folder Sync"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Change Folder…"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Limit upload speed to:"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Limit download speed to:"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Show Kation in the system tray when I log in"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "General"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Folders to Sync"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Network and Startup"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Connecting…"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid ""
+"<a href=\"protondrive:/\">Online view</a>: your Proton Drive as it is on the "
+"server, browsable in Dolphin without downloading. Changes made there are "
+"sent immediately, even while sync is paused."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid ""
+"Checked folders in “My files” are synced to this computer. Unchecked folders "
+"stay only in Proton Drive: their files already on this computer are kept, "
+"and you can delete them to free space."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgctxt "speed unit"
+msgid " KiB/s"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Speed Limits"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Apply to all transfers: folder sync and the online view."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Startup"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid ""
+"While folder sync is on, the background service starts with your session "
+"either way."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Kation is not running"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Could not reach the Kation background service: %1"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Signed in"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Signed in to Proton Drive as <b>%1</b>."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid ""
+"Finish signing in in your browser. If it did not open, <a href=\"%1\">open "
+"the sign-in page</a>, or copy the link to sign in on another device."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid ""
+"Sign in with your Proton account in your browser. Kation never sees your "
+"password."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Local folder: <b>%1</b>"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Turn Off Sync"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Turn On Sync"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Pause"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Resume"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid ""
+"Sync is off. Turn it on to keep this folder and your Proton Drive \"My "
+"files\" in sync."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Paused."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Paused: %1"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Up to date. Last synced %1."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Choose the Sync Folder"
+msgstr ""

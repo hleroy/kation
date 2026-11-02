@@ -1,0 +1,11 @@
+// SPDX-FileCopyrightText: 2026 Kation contributors
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#include "kationtypes.h"
+
+#include <QDBusMetaType>
+
+void Kation::registerDBusTypes()
+{
+    qDBusRegisterMetaType<QVariantMapList>();
+}

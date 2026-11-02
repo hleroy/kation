@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Kation contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+[D-BUS Service]
+Name=com.hleroy.Kation
+Exec=@KDE_INSTALL_FULL_BINDIR@/kationd serve
+# With systemd, start through the user unit so kationd is tied to the session.
+SystemdService=kationd.service

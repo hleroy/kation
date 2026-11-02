@@ -1,0 +1,42 @@
+{
+    "name": "kationd",
+    "private": true,
+    "version": "0.1.0",
+    "description": "Kation background service: Proton Drive access for KDE Plasma",
+    "license": "GPL-2.0-or-later",
+    "type": "module",
+    "engines": {
+        "bun": ">=1.4.2"
+    },
+    "scripts": {
+        "build": "bun ./scripts/build.ts",
+        "check-types": "tsc --noEmit",
+        "test": "bun test",
+        "dev": "bun ./src/main.ts"
+    },
+    "dependencies": {
+        "@noble/hashes": "^1.8.0",
+        "@protontech/crypto": "2.0.0",
+        "@protontech/drive-sdk": "file:../third_party/proton-drive-sdk/client/js",
+        "dbus-next": "0.10.2",
+        "ky": "^1.14.3",
+        "proton-drive-sdk-account": "file:../third_party/proton-drive-sdk/incubating/account/js",
+        "ttag": "^1.8.7"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "2.6.4",
+        "@types/bun": "^1.4.2",
+        "@types/jest": "^29.5.14",
+        "typescript": "^5.9.3"
+    },
+    "overrides": {
+        "@xmldom/xmldom": "^0.9.12",
+        "brace-expansion@1": "1.1.18",
+        "brace-expansion@2": "2.1.4",
+        "brace-expansion@5": "^5.0.9",
+        "tmp": "^0.2.7"
+    },
+    "patchedDependencies": {
+        "@protontech/crypto@2.0.0": "../third_party/proton-drive-sdk/config/js/patches/@protontech%2Fcrypto@2.0.0.patch"
+    }
+}

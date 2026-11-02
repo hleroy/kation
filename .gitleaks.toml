@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 Kation contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+title = "Kation gitleaks configuration"
+
+[extend]
+# Inherit all built-in rules, so new upstream rules apply without a change here.
+# Add project allowlists below, each with a description and both a line regex and
+# a path filter, so that nothing else in the same files is exempted.
+useDefault = true

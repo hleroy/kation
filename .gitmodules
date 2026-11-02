@@ -1,0 +1,3 @@
+[submodule "third_party/proton-drive-sdk"]
+	path = third_party/proton-drive-sdk
+	url = https://github.com/ProtonDriveApps/sdk.git

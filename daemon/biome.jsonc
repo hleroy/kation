@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: 2026 Kation contributors
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+// Formatter and linter for kationd. Run from daemon/: `bun x biome check --write`.
+// pre-commit runs it on staged files (see .pre-commit-config.yaml).
+{
+    "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+    "vcs": {
+        "enabled": true,
+        "clientKind": "git",
+        "useIgnoreFile": true,
+        "root": ".."
+    },
+    "files": {
+        // src/proton/ is copied from the Proton Drive CLI: keeping its upstream
+        // formatting keeps upstream merges simple.
+        "includes": ["**", "!src/proton", "!bun", "!dist"]
+    },
+    "formatter": {
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineWidth": 140
+    },
+    "javascript": {
+        "formatter": {
+            "quoteStyle": "single",
+            "trailingCommas": "all",
+            "semicolons": "always"
+        }
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "preset": "recommended",
+            "style": {
+                // `!` marks values that an earlier check guarantees but TypeScript
+                // cannot follow (an assert, a flag computed from the value).
+                "noNonNullAssertion": "off"
+            }
+        }
+    }
+}

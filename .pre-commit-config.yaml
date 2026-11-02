@@ -1,0 +1,96 @@
+# SPDX-FileCopyrightText: 2026 Kation contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# Set up once with `pre-commit install`: default_install_hook_types below installs
+# the pre-commit, commit-msg and pre-push hooks together.
+# Run everything by hand with `pre-commit run --all-files`.
+# The lint job in .github/workflows/ci.yml runs the same hooks on every push.
+
+# bun.lock is written by bun; the SDK submodule is upstream code.
+exclude: '^(third_party/|daemon/bun\.lock$)'
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: ['--markdown-linebreak-ext=md']
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+      - id: check-json
+      - id: check-yaml
+        # .clang-format holds one YAML document per language.
+        args: ['--allow-multiple-documents']
+      - id: check-xml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+
+  # Secret scan of the staged changes, with the project allowlist.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        args: ['--config=.gitleaks.toml', '--redact']
+
+  # Every file needs a copyright and licence: an SPDX header or a REUSE.toml entry.
+  - repo: https://github.com/fsfe/reuse-tool
+    rev: v6.3.0
+    hooks:
+      - id: reuse
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
+  # Conventional Commits. Keep the type list in sync with .github/workflows/pr-title.yml.
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.5.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [feat, fix, refactor, chore, docs, test, style, perf, ci, build, revert]
+
+  # KDE's C++ style, from .clang-format. The mirror pins the clang-format version,
+  # so local runs and CI format identically.
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v23.1.3
+    hooks:
+      - id: clang-format
+        types_or: [c++]
+        files: ^kde/
+
+  # TypeScript tools run from daemon/node_modules (run `bun install` in daemon/ first),
+  # so their versions come from daemon/bun.lock, which Dependabot keeps up to date.
+  - repo: local
+    hooks:
+      # Formatter and linter, configured in daemon/biome.jsonc (src/proton/ is excluded).
+      - id: biome
+        name: biome (kationd format and lint)
+        entry: bash -c 'cd daemon && ./node_modules/.bin/biome check --write --no-errors-on-unmatched --files-ignore-unknown=true "${@#daemon/}"' --
+        language: system
+        files: ^daemon/.*\.(ts|json|jsonc)$
+        exclude: ^daemon/src/proton/
+      - id: tsc
+        name: tsc (kationd type check)
+        entry: bash -c 'cd daemon && bun x tsc --noEmit -p .'
+        language: system
+        files: ^daemon/.*\.ts$
+        pass_filenames: false
+      # The unit tests are fast enough for every push; the full ctest suite runs in CI.
+      - id: bun-test
+        name: bun test (kationd unit tests)
+        entry: bash -c 'cd daemon && bun test'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

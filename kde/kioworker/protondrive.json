@@ -1,0 +1,23 @@
+{
+    "KDE-KIO-Protocols": {
+        "protondrive": {
+            "Class": ":internet",
+            "Icon": "folder-cloud",
+            "copyFromFile": true,
+            "copyToFile": true,
+            "deleteRecursive": true,
+            "deleting": true,
+            "input": "none",
+            "listing": ["Name", "Type", "Size", "Date", "CreationDate", "MimeType", "Access"],
+            "makedir": true,
+            "maxInstances": 8,
+            "maxInstancesPerHost": 8,
+            "moving": true,
+            "opening": false,
+            "output": "filesystem",
+            "protocol": "protondrive",
+            "reading": true,
+            "writing": true
+        }
+    }
+}

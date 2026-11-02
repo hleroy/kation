@@ -1,0 +1,8 @@
+{
+    "KPlugin": {
+        "Description": "Shows the Proton Drive sync state of files (Kation)",
+        "Description[fr]": "Affiche l'état de synchronisation Proton Drive des fichiers (Kation)",
+        "Name": "Proton Drive sync state (Kation)",
+        "Name[fr]": "État de synchronisation Proton Drive (Kation)"
+    }
+}

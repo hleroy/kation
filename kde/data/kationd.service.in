@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Kation contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# Kation's background service, bound to the graphical session: it stops when
+# you log out. D-Bus activation goes through this unit (SystemdService= in the
+# D-Bus service file). Kation enables it (start at login) while folder sync is
+# on: systemctl --user enable kationd.service
+[Unit]
+Description=Kation background service (unofficial Proton Drive client)
+Documentation=https://github.com/hleroy/kation
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=com.hleroy.Kation
+ExecStart=@KDE_INSTALL_FULL_BINDIR@/kationd serve
+Restart=on-failure
+RestartSec=10
+Slice=background.slice
+
+[Install]
+WantedBy=graphical-session.target

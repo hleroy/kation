@@ -1,0 +1,26 @@
+{
+    "compilerOptions": {
+        "allowJs": false,
+        "baseUrl": ".",
+        "esModuleInterop": true,
+        "forceConsistentCasingInFileNames": true,
+        "module": "esnext",
+        "moduleResolution": "bundler",
+        "paths": {
+            "proton-drive-sdk-account": ["./node_modules/proton-drive-sdk-account/src/index.ts"],
+            "proton-drive-sdk-account/*": ["./node_modules/proton-drive-sdk-account/src/*"],
+            "@protontech/drive-sdk": ["./node_modules/@protontech/drive-sdk/src/index.ts"],
+            "@protontech/drive-sdk/*": ["./node_modules/@protontech/drive-sdk/src/*"]
+        },
+        "noEmit": true,
+        "noImplicitAny": true,
+        "strict": true,
+        "skipLibCheck": true,
+        "target": "esnext",
+        "resolveJsonModule": true,
+        "allowImportingTsExtensions": true,
+        "types": ["bun", "jest"]
+    },
+    "include": ["src/**/*.ts", "scripts/**/*.ts", "e2e/**/*.ts", "test/**/*.ts"],
+    "exclude": ["**/node_modules/*"]
+}

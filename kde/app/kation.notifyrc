@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 Kation contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+[Global]
+IconName=folder-cloud
+Name=Kation
+Comment=Unofficial Proton Drive client
+Comment[fr]=Client Proton Drive non officiel
+DesktopEntry=com.hleroy.Kation
+
+[Event/syncError]
+Name=Sync problem
+Name[fr]=Problème de synchronisation
+Comment=Some files could not be synced
+Comment[fr]=Certains fichiers n'ont pas pu être synchronisés
+Action=Popup
+
+[Event/syncPaused]
+Name=Sync paused for safety
+Name[fr]=Synchronisation suspendue par sécurité
+Comment=Sync stopped by itself, for example before deleting many files
+Comment[fr]=La synchronisation s'est arrêtée d'elle-même, par exemple avant de supprimer de nombreux fichiers
+Action=Popup
+
+[Event/conflict]
+Name=Conflict
+Name[fr]=Conflit
+Comment=A file changed on both sides; both versions were kept
+Comment[fr]=Un fichier a été modifié des deux côtés ; les deux versions ont été conservées
+Action=Popup
+
+[Event/sessionEnded]
+Name=Signed out by Proton
+Name[fr]=Déconnecté par Proton
+Comment=The Proton session ended and you need to sign in again
+Comment[fr]=La session Proton a pris fin et vous devez vous reconnecter
+Action=Popup

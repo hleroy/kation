@@ -1,0 +1,85 @@
+# SPDX-FileCopyrightText: 2026 Kation contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+name: CI
+
+on:
+  # Branch pushes are covered by their pull request; only main runs on push.
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The hooks in .pre-commit-config.yaml (REUSE compliance among them).
+  lint:
+    name: Lint (pre-commit)
+    runs-on: ubuntu-24.04
+    steps:
+      # The type check resolves the SDK sources from the submodule.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: daemon/.bun-version
+      # The local hooks run the TypeScript tools from daemon/node_modules.
+      - name: Install kationd dependencies
+        working-directory: daemon
+        run: bun install --frozen-lockfile
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+
+  build:
+    name: Build and test (Fedora, KDE Frameworks 6)
+    runs-on: ubuntu-24.04
+    container: fedora:43
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf -y -q install --setopt=install_weak_deps=False \
+            git unzip cmake gcc-c++ ninja-build extra-cmake-modules gettext glibc-langpack-en \
+            qt6-qtbase-devel kf6-kio-devel kf6-kcoreaddons-devel kf6-ki18n-devel \
+            kf6-kdbusaddons-devel kf6-kwidgetsaddons-devel kf6-kconfig-devel dbus-daemon \
+            kf6-kstatusnotifieritem-devel kf6-knotifications-devel kf6-kcmutils-devel kf6-kwindowsystem-devel
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+      - name: Trust the checkout
+        run: git config --global --add safe.directory '*'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: daemon/.bun-version
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/usr
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        env:
+          KATION_SCREENSHOT_DIR: ${{ github.workspace }}/screenshots
+        run: ctest --test-dir build --output-on-failure
+      - name: Check the install
+        run: DESTDIR=$PWD/install cmake --install build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: kation-fedora-x64
+          path: |
+            install/
+            screenshots/
+          if-no-files-found: warn
+
+  # Packages are built for pull requests and releases only, not for pushes to
+  # main: a squash merge builds what its pull request already built.
+  packages:
+    name: Packages
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/packages.yml

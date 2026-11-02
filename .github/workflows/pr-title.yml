@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 Kation contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+name: PR Title
+
+# Pull requests land on main as squash merges, so the PR title becomes the commit
+# subject in `git log`. The local commit-msg hook never sees it, which makes this
+# workflow the only check of Conventional Commits on merged history.
+#
+# Kept out of ci.yml: `edited` must trigger a re-check when a title is fixed, and
+# in ci.yml it would replay the whole build for every title or description edit.
+on:
+  pull_request:
+    types: ['opened', 'edited', 'reopened', 'synchronize']
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-24.04
+    steps:
+      # Keep the type list in sync with the conventional-pre-commit hook in
+      # .pre-commit-config.yaml. A breaking-change `!` (`feat!: ...`) is accepted.
+      # Dependabot titles its PRs "chore(deps): Bump ...", and the capital B cannot
+      # be configured. Skipping the step, not the job, keeps the check green.
+      - name: Check the PR title against Conventional Commits
+        if: github.event.pull_request.user.login != 'dependabot[bot]'
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            refactor
+            chore
+            docs
+            test
+            style
+            perf
+            ci
+            build
+            revert
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            The description of the PR title "{title}" must start with a lowercase character.

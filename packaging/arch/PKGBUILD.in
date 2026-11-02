@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 Kation contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+# makepkg sources this file, reads its variables and sets $pkgdir.
+# shellcheck shell=bash disable=SC2034,SC2154
+
+# Arch package of the CMake build tree this file was generated in (see
+# cmake/KationPackaging.cmake). Run ./build-package.sh rather than makepkg: it
+# builds the tree first, then runs makepkg --nodeps, as nothing is compiled here
+# and Bun may come from bun.sh rather than pacman.
+
+pkgname=kation
+pkgver=@PROJECT_VERSION@
+pkgrel=1
+pkgdesc='Unofficial Proton Drive client for KDE Plasma'
+arch=(x86_64 aarch64)
+url='https://github.com/hleroy/kation'
+license=(GPL-2.0-or-later MIT)
+depends=(
+    gcc-libs glibc hicolor-icon-theme qt6-base
+    kcmutils kconfig kcoreaddons kdbusaddons ki18n kio knotifications
+    kstatusnotifieritem kwindowsystem
+    libsecret  # loaded at run time by kationd (Bun.secrets)
+)
+optdepends=(
+    'dolphin: protondrive:/, sync emblems and context menu in the file manager'
+    'systemsettings: Kation settings in System Settings'
+    'kwallet: keyring for the Proton session (or gnome-keyring)'
+)
+# `bun build --compile` appends the JavaScript to the kationd executable, and
+# stripping it removes the program.
+options=(!strip !debug)
+
+package() {
+    DESTDIR="$pkgdir" cmake --install '@PROJECT_BINARY_DIR@'
+}

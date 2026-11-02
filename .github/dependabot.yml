@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2026 Kation contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# Dependabot version updates. Options reference:
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+#
+# Supply-chain defense: every ecosystem declares a `cooldown:` so version-update
+# PRs wait after a release, long enough for a yanked or compromised package to be
+# caught before we merge it. 7 days is the floor: most recent npm and Actions
+# attacks (tj-actions, shai-hulud, qix/chalk-debug, axios) were exploited within a
+# week. Security updates from the GitHub Advisory DB skip the cooldown, so CVE
+# fixes still arrive at once.
+#
+# Not covered here:
+# - The Proton Drive SDK submodule (third_party/proton-drive-sdk) is pinned to a
+#   release tag. Dependabot's gitsubmodule ecosystem follows the branch head, so
+#   it would propose untagged commits; bump the submodule by hand.
+# - The `file:` dependencies on that submodule, which Dependabot skips.
+# - The container images in ci.yml and packages.yml.
+
+version: 2
+updates:
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'monthly'
+    cooldown:
+      default-days: 7
+    # Actions are pinned to commit SHAs; roll each cycle's bumps into one PR.
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+      github-actions-security:
+        applies-to: security-updates
+        patterns:
+          - '*'
+
+  # kationd's dependencies: daemon/package.json and daemon/bun.lock.
+  - package-ecosystem: 'bun'
+    directory: '/daemon'
+    schedule:
+      interval: 'monthly'
+    # npm is the largest supply-chain attack surface: majors wait a month, so they
+    # land in the following cycle.
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 14
+      semver-patch-days: 7
+    ignore:
+      # Pinned on purpose: patchedDependencies applies the SDK's patch to exactly
+      # this version, and a bump would leave the patch unapplied.
+      - dependency-name: '@protontech/crypto'
+    groups:
+      bun:
+        update-types:
+          - 'minor'
+          - 'patch'
+      bun-security:
+        applies-to: security-updates
+        patterns:
+          - '*'
