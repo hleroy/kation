@@ -76,10 +76,3 @@ jobs:
             install/
             screenshots/
           if-no-files-found: warn
-
-  # Packages are built for pull requests and releases only, not for pushes to
-  # main: a squash merge builds what its pull request already built.
-  packages:
-    name: Packages
-    if: github.event_name == 'pull_request'
-    uses: ./.github/workflows/packages.yml
