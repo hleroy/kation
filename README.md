@@ -60,6 +60,9 @@ provide (see [ROADMAP.md](ROADMAP.md#out-of-scope)).
 
 1. Enable the Secret Service in KWallet: System Settings → KDE Wallet →
    "Use KWallet for the Secret Service interface".
+   If another package pulled in GNOME Keyring and it now answers in place of
+   KWallet, [`scripts/disable-gnome-keyring.sh`](scripts/disable-gnome-keyring.sh)
+   stops it from starting (nothing is uninstalled; `--undo` restores it).
 2. Start **Kation** from the application launcher and click **Sign In…**.
 3. Open `protondrive:/` in Dolphin (or click **Open Online View**). It is
    also listed under Network.

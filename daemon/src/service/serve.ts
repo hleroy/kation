@@ -9,7 +9,7 @@
 import type { DriveEvent, Logger } from '@protontech/drive-sdk';
 import dbus from 'dbus-next';
 
-import type { Config } from '../config';
+import { type Config, CredentialsStoreType } from '../config';
 import { openDrive } from '../drive';
 import { Autostart } from '../sync/autostart';
 import { SyncController } from '../sync/controller';
@@ -19,6 +19,7 @@ import { DriveService } from './driveService';
 import { FakeAccount, FakeDrive } from './fakeDrive';
 import type { Account, DriveSdk } from './sdk';
 import { type Problem, Session } from './session';
+import { SessionRestorer, watchSecretService } from './sessionRestorer';
 import { DriveTree } from './tree';
 
 export type ServeOptions = {
@@ -51,6 +52,7 @@ export async function serve(options: ServeOptions): Promise<void> {
     const drive = new DriveService(backend.sdk, tree, logger);
     const bus = dbus.sessionBus();
     let server: DriveDbusServer | undefined;
+    let restorer: SessionRestorer | undefined;
     const sync = new SyncController({
         config: options.config,
         drive,
@@ -77,9 +79,17 @@ export async function serve(options: ServeOptions): Promise<void> {
             statusChanged: (status) => server?.emitStatusChanged(status),
             loginFinished: (success, message) => server?.emitLoginFinished(success, message),
             afterLogin: async () => {
+                await restorer?.stop();
                 tree.clear();
                 await backend.startEvents();
                 await sync.apply();
+            },
+            // Like a start while signed in: offline, sync still starts and events wait for the next start.
+            afterRestore: async () => {
+                await restorer?.stop();
+                tree.clear();
+                await backend.startEvents().catch((error: unknown) => logger.error('Failed to start Drive events', error));
+                await sync.apply().catch((error: unknown) => logger.error('Failed to start sync', error));
             },
             afterLogout: async () => {
                 await sync.onLogout();
@@ -108,6 +118,12 @@ export async function serve(options: ServeOptions): Promise<void> {
     await server.start();
     if (session.isLoggedIn()) {
         await backend.startEvents().catch((error: unknown) => logger.error('Failed to start Drive events', error));
+    } else if (!options.fakeDrive && options.config.credentialsStore === CredentialsStoreType.Keychain) {
+        logger.info('Signed out: no session in the keyring, or it is still locked. Reading it again when the keyring changes');
+        restorer = new SessionRestorer({ restore: () => session.restore(), watch: watchSecretService(bus), logger });
+        await restorer.start();
+    } else {
+        logger.info('Signed out: no saved session');
     }
     await sync.applyAutostart();
     await sync.apply();
@@ -132,6 +148,7 @@ export async function serve(options: ServeOptions): Promise<void> {
 
     await stopped;
     logger.info('Stopping');
+    await restorer?.stop();
     await server.stop(busClosed);
     await sync.dispose();
     await backend.dispose();
@@ -148,6 +165,7 @@ async function createProtonBackend(config: Config, onEvent: (event: DriveEvent) 
         problem: drive.problem,
         account: {
             isLoggedIn: () => drive.auth.isLoggedIn(),
+            loadSession: () => drive.auth.loadSession(),
             getEmail: async () => (await drive.addresses.getOwnPrimaryAddress()).email,
             authViaWeb: async (onSignInUrl, signal) => {
                 await drive.auth.authViaWeb(onSignInUrl, signal);

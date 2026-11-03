@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/disable-gnome-keyring.sh`: stops GNOME Keyring from taking over the Secret Service from KWallet when a dependency installed it (`--undo` restores it).
+
+### Fixed
+
+- Signed out after a reboot when the keyring was still locked as kationd started: kationd now signs in as soon as the keyring unlocks.
+
 ## [0.1.0] - 2026-11-02
 
 Initial release; its scope is in [ROADMAP.md](ROADMAP.md).
