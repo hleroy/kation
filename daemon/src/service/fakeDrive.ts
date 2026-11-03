@@ -423,6 +423,8 @@ export class FakeDrive {
 /** Account stand-in: signs in after a short delay without any network access. */
 export class FakeAccount implements Account {
     private readonly listeners = new Set<() => void>();
+    /** Tests: whether loadSession() finds a saved session. */
+    savedSession = false;
 
     constructor(
         private loggedIn = true,
@@ -431,6 +433,13 @@ export class FakeAccount implements Account {
 
     isLoggedIn(): boolean {
         return this.loggedIn;
+    }
+
+    async loadSession(): Promise<void> {
+        if (this.savedSession && !this.loggedIn) {
+            this.loggedIn = true;
+            this.notify();
+        }
     }
 
     async getEmail(): Promise<string> {

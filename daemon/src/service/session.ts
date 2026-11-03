@@ -36,6 +36,8 @@ export type SessionHooks = {
     loginFinished?: (success: boolean, message: string) => void;
     /** Runs after a successful sign-in, before LoginFinished (e.g. start event subscriptions). */
     afterLogin?: () => Promise<void>;
+    /** Runs after restore() signed in with the saved session. Must not throw. */
+    afterRestore?: () => Promise<void>;
     /** Runs after sign-out (e.g. clear caches). */
     afterLogout?: () => Promise<void>;
     /** Current problem to report in the status, if any. */
@@ -92,6 +94,35 @@ export class Session {
 
     isLoggedIn(): boolean {
         return this.account.isLoggedIn();
+    }
+
+    /**
+     * Reads the saved session again, for when the keyring could not give it at
+     * start (e.g. still locked). Returns whether kationd is now signed in.
+     */
+    async restore(): Promise<boolean> {
+        // A pending browser sign-in will save its own session; do not race it.
+        if (this.account.isLoggedIn() || this.pending) {
+            return this.account.isLoggedIn();
+        }
+        const problemBefore = this.status().problemCode;
+        await this.account.loadSession();
+        if (!this.account.isLoggedIn()) {
+            // Reading the keyring sets or clears its problem.
+            if (this.status().problemCode !== problemBefore) {
+                this.notifyStatus();
+            }
+            return false;
+        }
+        // A browser sign-in started while the keyring was read is no longer needed.
+        this.cancelLogin();
+        this.logger.info('Signed in with the session saved in the keyring');
+        this.sessionLost = false;
+        this.wasLoggedIn = true;
+        await this.loadEmail();
+        await this.hooks.afterRestore?.();
+        this.notifyStatus();
+        return true;
     }
 
     requireLogin(): void {

@@ -26,6 +26,8 @@ export type DriveSdk = Pick<
 /** Account operations Kation needs, implemented by the account module or a fake. */
 export interface Account {
     isLoggedIn(): boolean;
+    /** Reads the saved session again (e.g. once the keyring unlocks). Never throws for keyring errors. */
+    loadSession(): Promise<void>;
     /** Primary address of the signed-in user. */
     getEmail(): Promise<string>;
     /** Browser sign-in. Calls onSignInUrl once the URL is known, resolves when signed in. */
