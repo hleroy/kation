@@ -3,11 +3,13 @@
 
 # The .deb, .rpm and Arch packages from ./build-package.sh, each built,
 # installed and checked on its distribution, then uploaded as an artifact.
-# Called by ci.yml (pull requests) and release.yml (version tags).
+# Called by release.yml (version tags); run it by hand from the Actions tab
+# to check a packaging change before a release.
 name: Packages
 
 on:
   workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
