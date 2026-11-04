@@ -50,6 +50,7 @@ Unofficial Proton Drive client for KDE Plasma.
 - Conflicts keep both versions; deletions go to the Proton trash or the
   desktop Trash; locally changed files survive a remote folder deletion.
 - Safety pauses: missing or replaced sync folder (resumes when it is back),
+  sync folder on a disk that is not mounted (starts when it is mounted),
   different account, more than 100 deletions at once, undecryptable names.
 - Resumable transfers: interrupted downloads continue (checked against the
   SHA-1); uploads restart, as the SDK cannot continue them.

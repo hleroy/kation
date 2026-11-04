@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kation 0.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-01 23:03+0100\n"
+"POT-Creation-Date: 2026-11-04 21:38+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -240,6 +240,13 @@ msgstr[1] ""
 msgid ""
 "The sync folder %1 is missing or was replaced. Restore it and sync resumes "
 "by itself, or turn sync off and on again to start over."
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"The sync folder %1 is on a disk that is not mounted. Mount the disk and sync "
+"starts by itself."
 msgstr ""
 
 #: kde/dbus/kationtexts.cpp

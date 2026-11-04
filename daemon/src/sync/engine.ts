@@ -29,6 +29,7 @@ import { KationError, toKationError } from '../service/errors';
 import type { DriveSdk } from '../service/sdk';
 import type { DriveTree } from '../service/tree';
 import { conflictName, isIgnoredName, type LocalItem, MARKER_NAME, moveToTrash, scanFolder, statItem } from './local';
+import { findUnmountedDisk } from './mounts';
 import { type BaseEntry, childPath, nameOf, parentOf, type SyncState } from './state';
 
 export type SyncPhase = 'disabled' | 'idle' | 'syncing' | 'paused' | 'error';
@@ -37,12 +38,13 @@ export type SyncPhase = 'disabled' | 'idle' | 'syncing' | 'paused' | 'error';
  * Why sync is paused or cannot run, for the KDE side to word (and translate):
  * "user" (paused from the menu or settings), "deletions" (more than
  * deletionLimit items would be deleted at once), "folder" (the sync folder is
- * missing or was replaced), "account" (signed in to another account than the
- * one the folder was synced with), "signedOut" (sync is on but nobody is signed
- * in), "items" (some items could not be synced, with no error message), or ""
- * (none of these: see message).
+ * missing or was replaced), "notMounted" (the sync folder is on a disk that is
+ * not mounted), "account" (signed in to another account than the one the folder
+ * was synced with), "signedOut" (sync is on but nobody is signed in), "items"
+ * (some items could not be synced, with no error message), or "" (none of
+ * these: see message).
  */
-export type SyncReason = '' | 'user' | 'deletions' | 'folder' | 'account' | 'signedOut' | 'items';
+export type SyncReason = '' | 'user' | 'deletions' | 'folder' | 'notMounted' | 'account' | 'signedOut' | 'items';
 
 /** Default for SyncEngineOptions.maxDeletionsPerPass. */
 export const DEFAULT_MAX_DELETIONS_PER_PASS = 100;
@@ -104,6 +106,8 @@ export type SyncEngineOptions = {
     rescanIntervalMs?: number;
     /** Interval of the (local, cheap) check that the sync folder is still there. */
     rootCheckIntervalMs?: number;
+    /** The mount point the folder needs but that is not mounted, or undefined. */
+    unmountedDisk?: (folder: string) => Promise<string | undefined>;
 };
 
 type RemoteItem = {
@@ -129,7 +133,7 @@ type FolderContext = {
 /** Stops a pass and pauses sync until the user resumes it. */
 class SafetyPause extends Error {
     constructor(
-        readonly kind: 'deletions' | 'folder' | 'account',
+        readonly kind: 'deletions' | 'folder' | 'notMounted' | 'account',
         message: string,
     ) {
         super(message);
@@ -172,6 +176,8 @@ export class SyncEngine {
     /** Set when the user resumes after a deletion safety pause: the next pass may delete. */
     private allowMassDeletion = false;
     private pausedFor?: SafetyPause['kind'];
+    /** The last error creating the sync folder, logged once. */
+    private createError = '';
     private idleWaiters: (() => void)[] = [];
 
     constructor(options: SyncEngineOptions) {
@@ -185,6 +191,7 @@ export class SyncEngine {
             maxDeletionsPerPass: DEFAULT_MAX_DELETIONS_PER_PASS,
             rescanIntervalMs: 30 * 60 * 1000,
             rootCheckIntervalMs: 10 * 1000,
+            unmountedDisk: findUnmountedDisk,
             ...options,
         };
         this.status.lastSync = Number(options.state.getMeta('lastSync') ?? 0);
@@ -198,17 +205,15 @@ export class SyncEngine {
     /** Starts syncing: a full pass now, then on changes. */
     async start(paused = false): Promise<void> {
         this.paused = paused;
-        await mkdir(this.options.root, { recursive: true });
-        if (this.options.state.isEmpty()) {
-            await writeFile(path.join(this.options.root, MARKER_NAME), 'Synced by Kation. Do not delete.\n', { flag: 'a' });
-        }
+        const disk = await this.prepareRoot();
         // First sync (or an interrupted one): list everything. Otherwise trust the base
         // for remote folders and let Drive events (replayed by the SDK) say what changed.
         this.fullPass = this.options.state.getMeta('initialSyncDone') ? 'local' : 'fresh';
         for (const pending of this.options.state.pending()) {
             this.dirty.set(pending, true);
         }
-        if (this.options.watch) {
+        // Not stat'ed on a disk that is not mounted: an automount point would block.
+        if (this.options.watch && !disk && (await this.rootLooksValid())) {
             this.startWatcher();
         }
         this.rescanTimer = setInterval(() => this.requestFullPass('local'), this.options.rescanIntervalMs);
@@ -234,6 +239,8 @@ export class SyncEngine {
         // Drive change notifications keep being received while paused; they are applied on resume.
         this.logger.info(paused ? 'Sync paused' : 'Sync resumed');
         if (paused) {
+            // The user's pause wins over resuming by itself when the folder or disk is back.
+            this.pausedFor = undefined;
             this.abort.abort();
             clearTimeout(this.timer);
             this.timer = undefined;
@@ -385,6 +392,11 @@ export class SyncEngine {
             this.handlePassError(error, full, dirty, abort.signal.aborted);
             return;
         }
+        if (abort.signal.aborted) {
+            // Paused during the pass (see checkRootPresence, setPaused): put the work back, keep the status.
+            this.handlePassError(new KationError('Cancelled', 'Paused'), full, dirty, true);
+            return;
+        }
 
         if (failedFolders.length > 0) {
             for (const folder of failedFolders) {
@@ -428,17 +440,13 @@ export class SyncEngine {
         for (const [folder, fresh] of dirty) {
             this.dirty.set(folder, fresh || (this.dirty.get(folder) ?? false));
         }
+        // Paused for safety during the pass (see checkRootPresence): whatever the aborted
+        // pass ran into next, often the missing folder, must not replace that pause.
+        if (this.pausedFor) {
+            return;
+        }
         if (error instanceof SafetyPause) {
-            this.logger.warn(`Sync paused: ${error.message}`);
-            this.paused = true;
-            this.pausedFor = error.kind;
-            if (error.kind !== 'deletions') {
-                // Remembered so that turning sync off and on again starts over (see SyncController).
-                this.options.state.setMeta(SAFETY_PAUSE_META, error.kind);
-            }
-            clearTimeout(this.timer);
-            this.timer = undefined;
-            this.setStatus({ state: 'paused', message: error.message, reason: error.kind, current: '' });
+            this.pauseFor(error);
             return;
         }
         const kationError = toKationError(error);
@@ -457,13 +465,86 @@ export class SyncEngine {
         }
     }
 
-    /** Refuses to sync when the folder was removed or replaced, which would look like mass deletion. */
-    private async checkRoot(): Promise<void> {
+    private pauseFor(pause: SafetyPause): void {
+        this.logger.warn(`Sync paused: ${pause.message}`);
+        this.paused = true;
+        this.pausedFor = pause.kind;
+        if (pause.kind === 'folder' || pause.kind === 'account') {
+            // Remembered so that turning sync off and on again starts over (see SyncController).
+            this.options.state.setMeta(SAFETY_PAUSE_META, pause.kind);
+        } else if (pause.kind === 'notMounted') {
+            // Starting over would merge the disk's files back as new once it is mounted.
+            this.options.state.setMeta(SAFETY_PAUSE_META, undefined);
+        }
+        clearTimeout(this.timer);
+        this.timer = undefined;
+        this.setStatus({ state: 'paused', message: pause.message, reason: pause.kind, current: '' });
+    }
+
+    /**
+     * On a first sync, creates the sync folder, but not its parents: a missing parent is
+     * more likely a disk that is not there than folders to create. Never on a disk that is
+     * not mounted. Returns that disk's mount point, if any.
+     */
+    private async prepareRoot(): Promise<string | undefined> {
+        const disk = await this.options.unmountedDisk(this.options.root);
+        if (disk || !this.options.state.isEmpty() || this.stopped) {
+            return disk;
+        }
+        const created = await mkdir(this.options.root).then(
+            () => true,
+            (error: NodeJS.ErrnoException) => {
+                // Logged once: the folder check repeats every rootCheckIntervalMs.
+                if (error.code !== 'EEXIST' && error.message !== this.createError) {
+                    this.createError = error.message;
+                    this.logger.warn(`Cannot create the sync folder ${this.options.root}: ${error.message}`);
+                }
+                return false;
+            },
+        );
+        await writeFile(path.join(this.options.root, MARKER_NAME), 'Synced by Kation. Do not delete.\n', { flag: 'wx' }).catch(
+            (error: NodeJS.ErrnoException) => {
+                if (error.code !== 'EEXIST' && error.code !== 'ENOENT') {
+                    this.logger.warn(`Cannot write ${MARKER_NAME} in the sync folder: ${error.message}`);
+                }
+            },
+        );
+        if (created && this.options.watch && this.watcher === undefined && this.rescanTimer !== undefined) {
+            this.startWatcher();
+        }
+        return undefined;
+    }
+
+    /** Why sync cannot run in the sync folder now, or undefined. */
+    private async rootProblem(): Promise<SafetyPause | undefined> {
+        const notMounted = (disk: string) =>
+            new SafetyPause(
+                'notMounted',
+                `The sync folder ${this.options.root} is on a disk that is not mounted (${disk}). Mount it and sync starts by itself.`,
+            );
+        const disk = await this.prepareRoot();
+        if (disk) {
+            return notMounted(disk);
+        }
         if (!(await this.rootLooksValid())) {
-            throw new SafetyPause(
+            // The disk may have gone since the first check.
+            const gone = await this.options.unmountedDisk(this.options.root);
+            if (gone) {
+                return notMounted(gone);
+            }
+            // Removed or replaced: syncing would look like a mass deletion.
+            return new SafetyPause(
                 'folder',
                 `The sync folder ${this.options.root} is missing or was replaced. Restore it and sync resumes by itself, or turn sync off and on again to start over.`,
             );
+        }
+        return undefined;
+    }
+
+    private async checkRoot(): Promise<void> {
+        const problem = await this.rootProblem();
+        if (problem) {
+            throw problem;
         }
     }
 
@@ -544,6 +625,14 @@ export class SyncEngine {
             }
             return;
         }
+        if (local.size === 0 && base.size > 0) {
+            // Everything gone at once: the disk may have just been unmounted.
+            const problem = await this.rootProblem();
+            if (problem) {
+                throw problem;
+            }
+        }
+        this.abort.signal.throwIfAborted();
 
         this.checkDeletionCount(folder, base, local, remote);
         const names = [...new Set([...base.keys(), ...local.keys(), ...remote.keys()])].sort();
@@ -1122,10 +1211,20 @@ export class SyncEngine {
         if (this.stopped) {
             return;
         }
-        const present = await this.rootLooksValid();
-        if (!present && this.pausedFor !== 'folder' && !this.paused) {
-            this.requestFullPass('local'); // the pass pauses with an explanation
-        } else if (present && this.pausedFor === 'folder') {
+        const problem = await this.rootProblem();
+        if (this.stopped) {
+            return;
+        }
+        const waiting = this.pausedFor === 'folder' || this.pausedFor === 'notMounted';
+        if (problem && !waiting && !this.paused) {
+            // Stop a running pass now: it would see the folder's items as deleted.
+            this.pauseFor(problem);
+            this.abort.abort();
+        } else if (problem && (waiting || this.pausedFor === 'deletions') && problem.kind !== this.pausedFor) {
+            // A deletion pause may come from the missing folder: wait for it instead; the
+            // deletions are checked (and must be confirmed) again once it is back.
+            this.pauseFor(problem);
+        } else if (!problem && waiting) {
             this.logger.info('The sync folder is back; resuming sync');
             this.watcher?.close();
             if (this.options.watch) {

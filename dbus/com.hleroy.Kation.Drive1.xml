@@ -116,7 +116,8 @@
       a pause, in English), reason s (why sync is paused or cannot run, as a
       code: "user" paused by the user, "deletions" more than deletionLimit
       items would be deleted at once, "folder" the sync folder is missing or
-      was replaced, "account" signed in to another account than the folder's,
+      was replaced, "notMounted" the sync folder is on a disk that is not
+      mounted, "account" signed in to another account than the folder's,
       "signedOut" sync is on but nobody is signed in, "items" some items
       could not be synced, "" see message), deletionLimit u, current s (path
       being transferred), pending u (folders waiting), lastSync x (seconds
