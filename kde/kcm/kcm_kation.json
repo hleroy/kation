@@ -2,7 +2,7 @@
     "KPlugin": {
         "Description": "Unofficial Proton Drive client: account, folder sync and speed limits",
         "Description[fr]": "Client Proton Drive non officiel : compte, synchronisation de dossier et limites de vitesse",
-        "Icon": "folder-cloud",
+        "Icon": "com.hleroy.Kation",
         "Name": "Proton Drive (Kation)",
         "Name[fr]": "Proton Drive (Kation)"
     },

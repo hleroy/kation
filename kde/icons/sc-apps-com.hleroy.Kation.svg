@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Kation contributors
+SPDX-License-Identifier: GPL-2.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="base" x1="3" y1="45" x2="45" y2="3" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6D4AFF"/><stop offset="1" stop-color="#7341FF"/></linearGradient>
+    <radialGradient id="glow" cx="3" cy="46" r="60" gradientUnits="userSpaceOnUse"><stop offset="0.55" stop-color="#FF50C3" stop-opacity="0"/><stop offset="1" stop-color="#FF50C3"/></radialGradient>
+  </defs>
+  <rect x="3" y="4" width="42" height="42" rx="9" fill="#000" opacity=".15"/>
+  <rect x="3" y="3" width="42" height="42" rx="9" fill="url(#base)"/>
+  <rect x="3" y="3" width="42" height="42" rx="9" fill="url(#glow)"/>
+  <path fill="#fff" d="M9 12H14.5V36H9Z M13 20.72L21.72 12H29.5L13 28.5Z M19.53 21.97L30.5 36H23.4L15.55 25.95Z"/>
+  <path d="M36.5 11V19M32.5 15H40.5" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+</svg>

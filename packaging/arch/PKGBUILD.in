@@ -14,7 +14,7 @@ pkgrel=1
 pkgdesc='Unofficial Proton Drive client for KDE Plasma'
 arch=(x86_64 aarch64)
 url='https://github.com/hleroy/kation'
-license=(GPL-2.0-or-later MIT)
+license=(GPL-2.0-or-later MIT LGPL-3.0-or-later)
 depends=(
     gcc-libs glibc hicolor-icon-theme qt6-base
     kcmutils kconfig kcoreaddons kdbusaddons ki18n kio knotifications

@@ -61,7 +61,7 @@ void applyTrayAutostart()
         "Name=Kation\n"
         "Comment=Proton Drive in the system tray (unofficial client)\n"
         "Exec=kation --tray\n"
-        "Icon=folder-cloud\n"
+        "Icon=com.hleroy.Kation\n"
         "X-KDE-autostart-phase=2\n");
     file.commit();
 }

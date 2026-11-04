@@ -13,6 +13,7 @@
 #include <QAction>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QMenu>
 #include <QSignalSpy>
 #include <QTest>
@@ -43,6 +44,11 @@ private:
         QFile file(path);
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(content);
+    }
+    static QByteArray read(const QString &path)
+    {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     }
 
     QTemporaryDir m_home;
@@ -76,6 +82,8 @@ void TrayTest::followsSyncAndNotifiesConflicts()
     drive.SetSyncEnabled(true).waitForFinished();
     QTRY_COMPARE_WITH_TIMEOUT(m_tray->statusText(), u"Up to date"_s, 5000);
     QCOMPARE(m_tray->iconName(), u"kation-tray-ok"_s);
+    // Dolphin shows the synced folder with the Kation folder icon.
+    QTRY_VERIFY(read(local(u".directory"_s)).contains("Icon=kation-folder"));
     QVERIFY(action("pause")->isVisible());
     QCOMPARE(action("pause")->text(), u"Pause Sync"_s);
     QVERIFY(action("openFolder")->isVisible());
@@ -118,6 +126,7 @@ void TrayTest::followsSyncAndNotifiesConflicts()
     drive.SetSyncEnabled(false).waitForFinished();
     QTRY_COMPARE(m_tray->statusText(), u"Sync is off"_s);
     QCOMPARE(m_tray->iconName(), u"kation-tray"_s);
+    QTRY_VERIFY(!QFileInfo::exists(local(u".directory"_s)));
     QVERIFY(!action("pause")->isVisible());
     QVERIFY(!action("openFolder")->isVisible());
 }
@@ -133,6 +142,11 @@ void TrayTest::shipsItsStateIcons()
         const QByteArray svg = file.readAll();
         // The cloud follows the colour scheme (Plasma recolours it for the panel).
         QVERIFY2(svg.contains("id=\"current-color-scheme\"") && svg.contains("class=\"ColorScheme-Text\""), qPrintable(path));
+    }
+    // The application icon, named after the app ID.
+    QVERIFY(QFile::exists(QStringLiteral(KATION_ICONS_DIR "/sc-apps-com.hleroy.Kation.svg")));
+    for (const QString &size : {u"16"_s, u"22"_s, u"24"_s, u"32"_s, u"48"_s, u"64"_s, u"96"_s}) {
+        QVERIFY2(QFile::exists(QStringLiteral(KATION_ICONS_DIR "/") + size + u"-places-kation-folder.svg"_s), qPrintable(size));
     }
 }
 
