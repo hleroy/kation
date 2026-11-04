@@ -15,9 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - kationd creates the sync folder only on a first sync and never its missing parent folders; a sync folder that disappeared is no longer recreated empty.
-
-### Changed
-
 - New application icon: a K⁺ on a purple tile. The tray shows a K beside a cloud; the synced folder, `protondrive:/` and the online view show a folder with the same K and cloud, like Breeze's other folders.
 
 ### Fixed
