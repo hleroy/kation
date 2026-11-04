@@ -120,7 +120,8 @@ screenshot it. Expected:
   Startup**. General shows "Signed in" with the test account email, a
   Folder Sync section saying "Up to date. Last synced …", the italic
   third-party notice, and **Open Synced Folder**. Nothing is cut off.
-- A Kation icon (a cloud with a green check-mark badge) in the system tray.
+- A Kation icon (a K beside a cloud, with a green check-mark badge) in the
+  system tray.
   Closing the window leaves the icon; launching Kation again opens the
   window of the same instance (no second icon).
 

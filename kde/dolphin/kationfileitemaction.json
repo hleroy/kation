@@ -3,7 +3,7 @@
         "Description": "Copy public links and open items in the Proton Drive website (Kation)",
         "Description[fr]": "Copier les liens publics et ouvrir les éléments sur le site web de Proton Drive (Kation)",
         "EnabledByDefault": true,
-        "Icon": "folder-cloud",
+        "Icon": "com.hleroy.Kation",
         "MimeTypes": [
             "application/octet-stream",
             "inode/directory"

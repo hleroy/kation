@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `scripts/disable-gnome-keyring.sh`: stops GNOME Keyring from taking over the Secret Service from KWallet when a dependency installed it (`--undo` restores it).
 
+### Changed
+
+- New application icon: a K⁺ on a purple tile. The tray, Dolphin and the Proton Drive places show a K beside a cloud.
+
 ### Fixed
 
 - Signed out after a reboot when the keyring was still locked as kationd started: kationd now signs in as soon as the keyring unlocks.

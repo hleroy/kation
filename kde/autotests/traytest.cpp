@@ -134,6 +134,8 @@ void TrayTest::shipsItsStateIcons()
         // The cloud follows the colour scheme (Plasma recolours it for the panel).
         QVERIFY2(svg.contains("id=\"current-color-scheme\"") && svg.contains("class=\"ColorScheme-Text\""), qPrintable(path));
     }
+    // The application icon, named after the app ID.
+    QVERIFY(QFile::exists(QStringLiteral(KATION_ICONS_DIR "/sc-apps-com.hleroy.Kation.svg")));
 }
 
 QTEST_MAIN(TrayTest)

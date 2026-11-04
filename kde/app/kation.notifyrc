@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Kation contributors
 # SPDX-License-Identifier: GPL-2.0-or-later
 [Global]
-IconName=folder-cloud
+IconName=com.hleroy.Kation
 Name=Kation
 Comment=Unofficial Proton Drive client
 Comment[fr]=Client Proton Drive non officiel

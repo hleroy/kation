@@ -81,7 +81,7 @@ KationTray::KationTray(QObject *parent)
     m_statusAction->setEnabled(false);
     m_menu->addSeparator();
     m_signIn = m_menu->addAction(QIcon::fromTheme(QStringLiteral("im-user-online")), i18n("Sign In…"), this, &KationTray::settingsRequested);
-    m_openFolder = m_menu->addAction(QIcon::fromTheme(QStringLiteral("folder-cloud")), i18n("Open Synced Folder"), this, &KationTray::openSyncedFolder);
+    m_openFolder = m_menu->addAction(QIcon::fromTheme(QStringLiteral("kation-tray")), i18n("Open Synced Folder"), this, &KationTray::openSyncedFolder);
     m_openOnline = m_menu->addAction(QIcon::fromTheme(QStringLiteral("folder-remote")), i18n("Open Online View"), this, [this] {
         openUrl(QUrl(QStringLiteral("protondrive:/")));
     });
@@ -282,7 +282,7 @@ void KationTray::update()
     const bool paused = syncOn && (m_syncStatus.value(QStringLiteral("paused")).toBool() || state == QLatin1String("paused"));
 
     // Plasma's system tray does not draw overlay icons, so each state has its own
-    // icon (kde/icons): the cloud in the panel's text colour with a state badge.
+    // icon (kde/icons): the K and cloud in the panel's text colour with a state badge.
     QString icon = QStringLiteral("kation-tray");
     KStatusNotifierItem::ItemStatus itemStatus = KStatusNotifierItem::Active;
     if (!loggedIn) {
@@ -352,7 +352,7 @@ void KationTray::notify(const QString &eventId, const QString &title, const QStr
     notification->setComponentName(QStringLiteral("kation"));
     notification->setTitle(title);
     notification->setText(text.toHtmlEscaped());
-    notification->setIconName(QStringLiteral("folder-cloud"));
+    notification->setIconName(QStringLiteral("com.hleroy.Kation"));
     if (action) {
         auto notificationAction = notification->addAction(actionText);
         connect(notificationAction, &KNotificationAction::activated, this, action);

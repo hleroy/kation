@@ -33,7 +33,7 @@ int main(int argc, char **argv)
     about.setDesktopFileName(QStringLiteral("com.hleroy.Kation"));
     about.setOtherText(i18n("This is a third-party application not officially supported by Proton."));
     KAboutData::setApplicationData(about);
-    QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("folder-cloud")));
+    QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("com.hleroy.Kation")));
 
     QCommandLineParser parser;
     const QCommandLineOption trayOption(QStringLiteral("tray"), i18n("Start in the system tray without opening the window"));

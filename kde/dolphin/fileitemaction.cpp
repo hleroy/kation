@@ -51,7 +51,7 @@ public:
         }
 
         auto menu = new QMenu(i18n("Proton Drive"), parentWidget);
-        menu->setIcon(QIcon::fromTheme(QStringLiteral("folder-cloud")));
+        menu->setIcon(QIcon::fromTheme(QStringLiteral("kation-tray")));
         const QString name = item.name();
         const QPointer<QWidget> parent(parentWidget);
         menu->addAction(QIcon::fromTheme(QStringLiteral("link")), i18n("Copy Public Link"), this, [this, url, name, parent] {
@@ -145,7 +145,7 @@ private:
         KNotification::event(KNotification::Notification,
                              created ? i18n("Public link created") : i18n("Public link copied"),
                              i18n("The link to “%1” is in the clipboard.", name),
-                             QStringLiteral("folder-cloud"));
+                             QStringLiteral("com.hleroy.Kation"));
     }
 
     KationDriveInterface *m_drive = nullptr;
