@@ -7,4 +7,4 @@ Name=Proton Drive (online)
 Name[fr]=Proton Drive (en ligne)
 Comment=Live view of your Proton Drive through Kation, an unofficial client. Not synced: changes are sent immediately.
 Comment[fr]=Vue en direct de votre Proton Drive par Kation, un client non officiel. Pas de synchronisation : les modifications sont envoyées immédiatement.
-Icon=kation-tray
+Icon=kation-folder

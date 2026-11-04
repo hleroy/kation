@@ -51,7 +51,7 @@ public:
         }
 
         auto menu = new QMenu(i18n("Proton Drive"), parentWidget);
-        menu->setIcon(QIcon::fromTheme(QStringLiteral("kation-tray")));
+        menu->setIcon(QIcon::fromTheme(QStringLiteral("kation-folder")));
         const QString name = item.name();
         const QPointer<QWidget> parent(parentWidget);
         menu->addAction(QIcon::fromTheme(QStringLiteral("link")), i18n("Copy Public Link"), this, [this, url, name, parent] {

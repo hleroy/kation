@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- New application icon: a K⁺ on a purple tile. The tray, Dolphin and the Proton Drive places show a K beside a cloud.
+- New application icon: a K⁺ on a purple tile. The tray shows a K beside a cloud; the synced folder, `protondrive:/` and the online view show a folder with the same K and cloud, like Breeze's other folders.
 
 ### Fixed
 

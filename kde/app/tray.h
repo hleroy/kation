@@ -52,6 +52,7 @@ private:
     void openSyncedFolder();
     void openUrl(const QUrl &url);
     void showInFileManager(const QString &localPath);
+    void updateFolderIcon();
 
     KationDriveInterface *m_drive;
     KStatusNotifierItem *m_item;
@@ -72,4 +73,7 @@ private:
     QTimer *m_conflictTimer;
     /// Messages already notified, so a lasting problem is notified once.
     QSet<QString> m_notifiedProblems;
+    /// The sync folder whose icon was last set, and whether sync was on.
+    QString m_iconFolder;
+    bool m_iconOn = false;
 };

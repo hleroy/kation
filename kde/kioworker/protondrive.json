@@ -2,7 +2,7 @@
     "KDE-KIO-Protocols": {
         "protondrive": {
             "Class": ":internet",
-            "Icon": "kation-tray",
+            "Icon": "kation-folder",
             "copyFromFile": true,
             "copyToFile": true,
             "deleteRecursive": true,

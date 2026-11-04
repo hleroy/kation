@@ -50,6 +50,7 @@ jobs:
               /usr/lib/systemd/user/kationd.service \
               /usr/share/knotifications6/kation.notifyrc \
               /usr/share/icons/hicolor/scalable/apps/com.hleroy.Kation.svg \
+              /usr/share/icons/hicolor/64x64/places/kation-folder.svg \
               /usr/share/icons/hicolor/scalable/status/kation-tray.svg \
               /usr/share/locale/fr/LC_MESSAGES/kation.mo; do
             dpkg -S "$path"
@@ -97,6 +98,7 @@ jobs:
               /usr/lib/systemd/user/kationd.service \
               /usr/share/knotifications6/kation.notifyrc \
               /usr/share/icons/hicolor/scalable/apps/com.hleroy.Kation.svg \
+              /usr/share/icons/hicolor/64x64/places/kation-folder.svg \
               /usr/share/icons/hicolor/scalable/status/kation-tray.svg \
               /usr/share/locale/fr/LC_MESSAGES/kation.mo; do
             rpm -qf "$path"
@@ -143,6 +145,7 @@ jobs:
               /usr/lib/systemd/user/kationd.service \
               /usr/share/knotifications6/kation.notifyrc \
               /usr/share/icons/hicolor/scalable/apps/com.hleroy.Kation.svg \
+              /usr/share/icons/hicolor/64x64/places/kation-folder.svg \
               /usr/share/icons/hicolor/scalable/status/kation-tray.svg \
               /usr/share/locale/fr/LC_MESSAGES/kation.mo \
               /usr/share/licenses/kation/MIT.txt; do

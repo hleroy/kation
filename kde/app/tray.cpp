@@ -6,6 +6,8 @@
 #include "kationtexts.h"
 #include "kationtypes.h"
 
+#include <KConfig>
+#include <KConfigGroup>
 #include <KIO/JobUiDelegateFactory>
 #include <KIO/OpenFileManagerWindowJob>
 #include <KIO/OpenUrlJob>
@@ -18,6 +20,7 @@
 #include <QDBusPendingReply>
 #include <QDBusServiceWatcher>
 #include <QDateTime>
+#include <QFile>
 #include <QFileInfo>
 #include <QLocale>
 #include <QMenu>
@@ -81,7 +84,7 @@ KationTray::KationTray(QObject *parent)
     m_statusAction->setEnabled(false);
     m_menu->addSeparator();
     m_signIn = m_menu->addAction(QIcon::fromTheme(QStringLiteral("im-user-online")), i18n("Sign In…"), this, &KationTray::settingsRequested);
-    m_openFolder = m_menu->addAction(QIcon::fromTheme(QStringLiteral("kation-tray")), i18n("Open Synced Folder"), this, &KationTray::openSyncedFolder);
+    m_openFolder = m_menu->addAction(QIcon::fromTheme(QStringLiteral("kation-folder")), i18n("Open Synced Folder"), this, &KationTray::openSyncedFolder);
     m_openOnline = m_menu->addAction(QIcon::fromTheme(QStringLiteral("folder-remote")), i18n("Open Online View"), this, [this] {
         openUrl(QUrl(QStringLiteral("protondrive:/")));
     });
@@ -211,7 +214,56 @@ void KationTray::showSyncStatus(const QVariantMap &status)
         // Notify again if the same problem comes back later.
         m_notifiedProblems.clear();
     }
+    updateFolderIcon();
     update();
+}
+
+namespace
+{
+const QString folderIcon = QStringLiteral("kation-folder");
+
+/// Sets or clears the folder's icon in its .directory file, as Dolphin's "Change Icon…" does.
+/// kationd does not sync .directory files; an icon the user chose is left alone.
+/// Returns false when the folder does not exist (yet).
+bool setFolderIcon(const QString &folder, bool on)
+{
+    if (!QFileInfo(folder).isDir()) {
+        return false;
+    }
+    const QString path = folder + QStringLiteral("/.directory");
+    {
+        KConfig directory(path, KConfig::SimpleConfig);
+        KConfigGroup entry = directory.group(QStringLiteral("Desktop Entry"));
+        const QString icon = entry.readEntry("Icon");
+        if (on && icon.isEmpty()) {
+            entry.writeEntry("Icon", folderIcon);
+        } else if (!on && icon == folderIcon) {
+            entry.deleteEntry("Icon");
+        } else {
+            return true;
+        }
+        directory.sync();
+    }
+    if (QFileInfo(path).size() == 0) {
+        QFile::remove(path);
+    }
+    return true;
+}
+}
+
+void KationTray::updateFolderIcon()
+{
+    const QString folder = m_syncStatus.value(QStringLiteral("folder")).toString();
+    const bool on = m_syncStatus.value(QStringLiteral("enabled")).toBool();
+    if (folder == m_iconFolder && on == m_iconOn) {
+        return;
+    }
+    if (!m_iconFolder.isEmpty() && m_iconFolder != folder) {
+        setFolderIcon(m_iconFolder, false);
+    }
+    // kationd reports sync as on before it creates the folder: the next status tries again.
+    m_iconFolder = folder.isEmpty() || setFolderIcon(folder, on) ? folder : QString();
+    m_iconOn = on;
 }
 
 void KationTray::addActivity(const QVariantMap &activity)
