@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-05
+
 ### Added
 
 - `scripts/disable-gnome-keyring.sh`: stops GNOME Keyring from taking over the Secret Service from KWallet when a dependency installed it (`--undo` restores it).
@@ -39,5 +41,6 @@ Initial release; its scope is in [ROADMAP.md](ROADMAP.md).
 - Debian, Fedora and Arch packages: `./build-package.sh` builds one for the distribution it runs on.
 - GitHub releases come with packages for Debian 13, Fedora 43 and Arch Linux.
 
-[Unreleased]: https://github.com/hleroy/kation/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/hleroy/kation/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/hleroy/kation/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hleroy/kation/releases/tag/v0.1.0
