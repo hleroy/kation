@@ -48,6 +48,8 @@ void KationTextsTest::syncReasons_data()
         << with(u"folder"_s)
         << u"The sync folder /home/u/Proton Drive is missing or was replaced. Restore it and sync resumes by itself, or turn sync off and on "
            u"again to start over."_s;
+    QTest::newRow("notMounted") << with(u"notMounted"_s)
+                                << u"The sync folder /home/u/Proton Drive is on a disk that is not mounted. Mount the disk and sync starts by itself."_s;
     QTest::newRow("account") << with(u"account"_s)
                              << u"You are signed in to a different Proton account than the one this folder was synced with. Turn sync off and on again to "
                                 u"sync this folder with the current account instead."_s;

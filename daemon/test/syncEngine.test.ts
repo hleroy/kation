@@ -10,7 +10,7 @@ import { NodeType } from '@protontech/drive-sdk';
 import { DriveService } from '../src/service/driveService';
 import { FakeDrive } from '../src/service/fakeDrive';
 import { DriveTree } from '../src/service/tree';
-import { SyncEngine, type SyncEngineOptions } from '../src/sync/engine';
+import { SAFETY_PAUSE_META, SyncEngine, type SyncEngineOptions } from '../src/sync/engine';
 import { moveToTrash } from '../src/sync/local';
 import { SyncState } from '../src/sync/state';
 import { countingSdk, silentLogger, tempDir } from './helpers';
@@ -45,6 +45,7 @@ async function setup(options: Partial<SyncEngineOptions> & { fake?: FakeDrive; s
         settleMs: 0,
         debounceMs: 0,
         trash: (absolutePath) => moveToTrash(absolutePath, trashHome),
+        unmountedDisk: async () => undefined,
         ...options,
     });
     engines.push(engine);
@@ -547,6 +548,225 @@ describe('SyncEngine', () => {
         expect(await ctx.trashed()).toEqual([]);
         expect(ctx.engine.getStatus().state).toBe('error');
         sdk.iterateNodes = original;
+    });
+
+    it('waits for the disk instead of syncing into its empty mount point', async () => {
+        let disk: string | undefined = '/mnt/data';
+        const ctx = await setup({ unmountedDisk: async () => disk, rootCheckIntervalMs: 20 });
+        ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'precious.txt', type: NodeType.File, content: 'x' });
+        await ctx.engine.start();
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'notMounted' });
+        expect(ctx.engine.getStatus().message).toContain('not mounted (/mnt/data)');
+        expect(await stat(ctx.root).catch(() => undefined)).toBeUndefined();
+        expect(ctx.state.getMeta(SAFETY_PAUSE_META)).toBeUndefined();
+
+        disk = undefined;
+        for (let i = 0; i < 50 && ctx.engine.getStatus().state !== 'idle'; i++) {
+            await Bun.sleep(20);
+        }
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'idle', reason: '' });
+        expect(await readFile(ctx.local('precious.txt'), 'utf8')).toBe('x');
+    });
+
+    it('pauses when the disk is unmounted after a sync, and resumes when it is back', async () => {
+        let disk: string | undefined;
+        const ctx = await setup({ unmountedDisk: async () => disk, rootCheckIntervalMs: 20 });
+        ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'precious.txt', type: NodeType.File, content: 'x' });
+        await ctx.engine.start();
+        await ctx.settle();
+
+        disk = '/mnt/data';
+        for (let i = 0; i < 50 && ctx.engine.getStatus().state !== 'paused'; i++) {
+            await Bun.sleep(20);
+        }
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'notMounted' });
+        disk = undefined;
+        for (let i = 0; i < 50 && ctx.engine.getStatus().state !== 'idle'; i++) {
+            await Bun.sleep(20);
+        }
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'idle', reason: '' });
+        expect(child(ctx.fake, ctx.fake.rootUid, 'precious.txt')).toBeDefined();
+    });
+
+    it('stops a running pass when the disk is unmounted', async () => {
+        let disk: string | undefined;
+        const fake = new FakeDrive({ chunkDelayMs: 40 });
+        for (let i = 0; i < 20; i++) {
+            fake.add({ parentUid: fake.rootUid, name: `file${i}.txt`, type: NodeType.File, content: `content ${i}` });
+        }
+        const ctx = await setup({ fake, unmountedDisk: async () => disk, rootCheckIntervalMs: 20 });
+        await ctx.engine.start();
+        for (let i = 0; i < 100 && ctx.engine.getStatus().current === ''; i++) {
+            await Bun.sleep(5);
+        }
+        disk = '/mnt/data';
+        for (let i = 0; i < 50 && ctx.engine.getStatus().state !== 'paused'; i++) {
+            await Bun.sleep(10);
+        }
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'notMounted' });
+        expect((await readdir(ctx.root)).filter((name) => name.endsWith('.txt')).length).toBeLessThan(20);
+
+        disk = undefined;
+        for (let i = 0; i < 100 && ctx.engine.getStatus().state !== 'idle'; i++) {
+            await Bun.sleep(20);
+        }
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'idle', reason: '' });
+        expect((await readdir(ctx.root)).filter((name) => name.endsWith('.txt')).length).toBe(20);
+    });
+
+    it("keeps the user's pause when the disk comes back", async () => {
+        let disk: string | undefined = '/mnt/data';
+        const ctx = await setup({ unmountedDisk: async () => disk, rootCheckIntervalMs: 20 });
+        await ctx.engine.start();
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'notMounted' });
+
+        ctx.engine.setPaused(true);
+        disk = undefined;
+        await Bun.sleep(100);
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'user' });
+    });
+
+    it('waits for the disk instead of a deletion pause caused by its absence', async () => {
+        let disk: string | undefined;
+        const ctx = await setup({ unmountedDisk: async () => disk, rootCheckIntervalMs: 20, maxDeletionsPerPass: 2 });
+        for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name, type: NodeType.File, content: name });
+        }
+        await ctx.engine.start();
+        await ctx.settle();
+        for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+            await rm(ctx.local(name));
+        }
+        ctx.engine.syncNow();
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'deletions' });
+
+        disk = '/mnt/data';
+        for (let i = 0; i < 50 && ctx.engine.getStatus().reason !== 'notMounted'; i++) {
+            await Bun.sleep(20);
+        }
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'notMounted' });
+        disk = undefined;
+        for (let i = 0; i < 50 && ctx.engine.getStatus().reason !== 'deletions'; i++) {
+            await Bun.sleep(20);
+        }
+        // Back, the deletions must be confirmed again.
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'deletions' });
+        expect(child(ctx.fake, ctx.fake.rootUid, 'a.txt')).toBeDefined();
+    });
+
+    it('checks the disk before acting on a folder whose items all vanished', async () => {
+        let disk: string | undefined;
+        let unmountDuringPass = false;
+        const ctx = await setup({
+            unmountedDisk: async () => {
+                if (unmountDuringPass) {
+                    // The pass has checked the disk; it goes away before the folders are scanned.
+                    unmountDuringPass = false;
+                    for (const name of ['a.txt', 'b.txt']) {
+                        await rm(ctx.local(name));
+                    }
+                    disk = '/mnt/data';
+                    return undefined;
+                }
+                return disk;
+            },
+        });
+        for (const name of ['a.txt', 'b.txt']) {
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name, type: NodeType.File, content: name });
+        }
+        await ctx.engine.start();
+        await ctx.settle();
+
+        unmountDuringPass = true;
+        ctx.engine.syncNow();
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'notMounted' });
+        expect(child(ctx.fake, ctx.fake.rootUid, 'a.txt')).toBeDefined();
+    });
+
+    it('does not download into the mount point once the disk is unmounted mid-pass', async () => {
+        let disk: string | undefined;
+        const fake = new FakeDrive({ chunkDelayMs: 40 });
+        for (let i = 0; i < 20; i++) {
+            fake.add({ parentUid: fake.rootUid, name: `file${i}.txt`, type: NodeType.File, content: `content ${i}` });
+        }
+        // The disk is mounted at Data; the folder check does not run during the test.
+        const root = path.join(await tempDir(), 'Data', 'Proton Drive');
+        await mkdir(path.dirname(root));
+        const ctx = await setup({ fake, root, unmountedDisk: async () => disk, rootCheckIntervalMs: 60_000 });
+        await ctx.engine.start();
+        for (let i = 0; i < 100 && ctx.engine.getStatus().current === ''; i++) {
+            await Bun.sleep(5);
+        }
+        const away = `${root}-on-disk`;
+        await rename(root, away);
+        disk = path.dirname(root);
+        for (let i = 0; i < 100 && ctx.engine.getStatus().state !== 'paused'; i++) {
+            await Bun.sleep(20);
+        }
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'notMounted' });
+        expect(await stat(root).catch(() => undefined)).toBeUndefined();
+    });
+
+    it('watches the folder after resuming a pause that began while the disk was missing', async () => {
+        const fake = new FakeDrive();
+        fake.add({ parentUid: fake.rootUid, name: 'precious.txt', type: NodeType.File, content: 'x' });
+        const stateFile = path.join(await tempDir(), 'sync.sqlite');
+        const first = await setup({ fake, stateFile });
+        await first.engine.start();
+        await first.settle();
+        await first.engine.stop();
+        first.stop();
+
+        // Paused at login, before the disk is mounted; the user resumes once it is.
+        let disk: string | undefined = '/mnt/data';
+        const ctx = await setup({ fake, stateFile, root: first.root, watch: true, unmountedDisk: async () => disk });
+        await ctx.engine.start(true);
+        disk = undefined;
+        ctx.engine.setPaused(false);
+        await ctx.settle();
+        expect(ctx.engine.getStatus().state).toBe('idle');
+
+        await edit(ctx.local('after.txt'), 'after');
+        for (let i = 0; i < 100 && !child(ctx.fake, ctx.fake.rootUid, 'after.txt'); i++) {
+            await Bun.sleep(20);
+        }
+        expect(child(ctx.fake, ctx.fake.rootUid, 'after.txt')).toBeDefined();
+    });
+
+    it('creates the sync folder but not missing parent folders', async () => {
+        const root = path.join(await tempDir(), 'Absent', 'Proton Drive');
+        const ctx = await setup({ root });
+        await ctx.engine.start();
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'folder' });
+        expect(await stat(path.dirname(root)).catch(() => undefined)).toBeUndefined();
+    });
+
+    it('does not recreate a sync folder that disappeared while kationd was stopped', async () => {
+        const fake = new FakeDrive();
+        fake.add({ parentUid: fake.rootUid, name: 'precious.txt', type: NodeType.File, content: 'x' });
+        const stateFile = path.join(await tempDir(), 'sync.sqlite');
+        const first = await setup({ fake, stateFile });
+        await first.engine.start();
+        await first.settle();
+        await first.engine.stop();
+        first.stop();
+
+        await rm(first.root, { recursive: true });
+        const second = await setup({ fake, stateFile, root: first.root });
+        await second.engine.start();
+        await second.settle();
+        expect(second.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'folder' });
+        expect(await stat(first.root).catch(() => undefined)).toBeUndefined();
+        expect(child(fake, fake.rootUid, 'precious.txt')).toBeDefined();
     });
 
     it('never writes outside the sync folder, whatever the remote names', async () => {

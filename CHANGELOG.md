@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `scripts/disable-gnome-keyring.sh`: stops GNOME Keyring from taking over the Secret Service from KWallet when a dependency installed it (`--undo` restores it).
+- Sync waits for the disk when the sync folder is on a disk that is not mounted, instead of syncing into its empty mount point, and starts once the disk is mounted.
 
 ### Changed
 
+- kationd creates the sync folder only on a first sync and never its missing parent folders; a sync folder that disappeared is no longer recreated empty.
 - New application icon: a K⁺ on a purple tile. The tray shows a K beside a cloud; the synced folder, `protondrive:/` and the online view show a folder with the same K and cloud, like Breeze's other folders.
 
 ### Fixed

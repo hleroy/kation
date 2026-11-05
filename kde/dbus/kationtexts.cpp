@@ -20,6 +20,10 @@ QString Kation::syncReasonText(const QVariantMap &syncStatus)
         return i18n("The sync folder %1 is missing or was replaced. Restore it and sync resumes by itself, or turn sync off and on again to start over.",
                     syncStatus.value(QStringLiteral("folder")).toString());
     }
+    if (reason == QLatin1String("notMounted")) {
+        return i18n("The sync folder %1 is on a disk that is not mounted. Mount the disk and sync starts by itself.",
+                    syncStatus.value(QStringLiteral("folder")).toString());
+    }
     if (reason == QLatin1String("account")) {
         return i18n(
             "You are signed in to a different Proton account than the one this folder was synced with. Turn sync off and on again to sync this folder with "
