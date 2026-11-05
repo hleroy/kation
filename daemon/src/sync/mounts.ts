@@ -6,7 +6,7 @@
  * point would put the files on the system disk, hidden under the disk once it is
  * mounted.
  */
-import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, readlink, stat } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import path from 'node:path';
 
@@ -57,7 +57,6 @@ export function parseFstab(text: string): string[] {
             continue;
         }
         const point = decodeOctal(fields[1]);
-        // Skips "none" and "swap".
         if (path.isAbsolute(point)) {
             points.push(withoutTrailingSlash(path.normalize(point)));
         }
@@ -86,12 +85,6 @@ export function unmountedMountPoint(folder: string, table: MountTable, user: str
         }
     }
     return undefined;
-}
-
-/** `point` with the symbolic links above it resolved; the point itself is left alone (no automount). */
-export async function resolveMountPoint(point: string): Promise<string> {
-    const parent = await realpath(path.dirname(point)).catch(() => path.dirname(point));
-    return path.join(parent, path.basename(point));
 }
 
 /**
@@ -143,29 +136,61 @@ function userName(): string {
 /** Automount points being mounted by an access, or when to try again after a failure. */
 const triggering = new Map<string, number>();
 const TRIGGER_RETRY_MS = 60 * 1000;
+/** How long a check waits for an automount point to mount its disk. */
+const TRIGGER_WAIT_MS = 2000;
 
 /** Default for SyncEngineOptions.unmountedDisk. */
-export async function findUnmountedDisk(folder: string): Promise<string | undefined> {
-    const { mounted, automount } = parseMountInfo(await readFile('/proc/self/mountinfo', 'utf8').catch(() => ''));
-    if (mounted.size === 0) {
+export function findUnmountedDisk(folder: string): Promise<string | undefined> {
+    return checkMounts(folder, true);
+}
+
+/** The mount table from the text of /proc/self/mountinfo and /etc/fstab. */
+export async function readMountTable(mountInfo: string, fstab: string): Promise<MountTable> {
+    const { mounted, automount } = parseMountInfo(mountInfo);
+    // mountinfo has resolved paths; fstab may go through symbolic links, up to and
+    // including the mount point itself (systemd follows those too). A point mounted as
+    // written is left alone: lstat on a hung network share would block.
+    const declared = await Promise.all(
+        parseFstab(fstab).map((point) => (mounted.has(point) ? point : resolveFolder(point, (dir) => automount.has(dir)))),
+    );
+    return { mounted, automount, declared };
+}
+
+async function checkMounts(folder: string, trigger: boolean): Promise<string | undefined> {
+    const mountInfo = await readFile('/proc/self/mountinfo', 'utf8').catch(() => '');
+    if (parseMountInfo(mountInfo).mounted.size === 0) {
         // Cannot tell what is mounted: do not block sync on a guess.
         return undefined;
     }
-    const fstab = parseFstab(await readFile('/etc/fstab', 'utf8').catch(() => ''));
-    // mountinfo has resolved paths; fstab and the folder may go through symbolic links.
-    const declared = await Promise.all(fstab.map(resolveMountPoint));
-    const table: MountTable = { mounted, automount, declared };
+    const table = await readMountTable(mountInfo, await readFile('/etc/fstab', 'utf8').catch(() => ''));
+    const { mounted, automount, declared } = table;
     const notMounted = (dir: string) => (declared.includes(dir) || automount.has(dir)) && !mounted.has(dir);
     const absolute = path.isAbsolute(folder) ? folder : path.resolve(folder);
     const disk = unmountedMountPoint(await resolveFolder(absolute, notMounted), table, userName());
-    if (disk && automount.has(disk) && (triggering.get(disk) ?? 0) < Date.now()) {
-        // Accessing an automount point mounts its disk; the next check sees the result.
-        // One access at a time, and not again soon after one that failed (disk absent).
+    if (trigger && disk && automount.has(disk) && (triggering.get(disk) ?? 0) < Date.now()) {
+        // Accessing an automount point mounts its disk. One access at a time, and not
+        // again soon after one that failed (disk absent).
         triggering.set(disk, Number.POSITIVE_INFINITY);
-        void stat(`${disk}/.`).then(
-            () => triggering.delete(disk),
-            () => triggering.set(disk, Date.now() + TRIGGER_RETRY_MS),
+        const mounting = stat(`${disk}/.`).then(
+            () => {
+                triggering.delete(disk);
+                return true;
+            },
+            () => {
+                triggering.set(disk, Date.now() + TRIGGER_RETRY_MS);
+                return false;
+            },
         );
+        // A disk that is there mounts within moments: not worth a "not mounted" pause.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const waited = new Promise<false>((resolve) => {
+            timer = setTimeout(resolve, TRIGGER_WAIT_MS, false);
+        });
+        const nowMounted = await Promise.race([mounting, waited]);
+        clearTimeout(timer);
+        if (nowMounted) {
+            return checkMounts(folder, false);
+        }
     }
     return disk;
 }

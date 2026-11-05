@@ -373,6 +373,10 @@ export class SyncEngine {
         let failedFolders: string[] = [];
         try {
             await this.checkRoot();
+            // Not running after a start on a missing disk or folder, or after one went missing.
+            if (this.options.watch && this.watcher === undefined) {
+                this.startWatcher();
+            }
             if (full) {
                 // The traversal lists folders with remote changes from the server (freshFolders),
                 // so it covers every dirty folder.
@@ -476,6 +480,11 @@ export class SyncEngine {
             // Starting over would merge the disk's files back as new once it is mounted.
             this.options.state.setMeta(SAFETY_PAUSE_META, undefined);
         }
+        if (pause.kind === 'folder' || pause.kind === 'notMounted') {
+            // It watches a folder that is gone; the next pass watches the one that is back.
+            this.watcher?.close();
+            this.watcher = undefined;
+        }
         clearTimeout(this.timer);
         this.timer = undefined;
         this.setStatus({ state: 'paused', message: pause.message, reason: pause.kind, current: '' });
@@ -491,17 +500,13 @@ export class SyncEngine {
         if (disk || !this.options.state.isEmpty() || this.stopped) {
             return disk;
         }
-        const created = await mkdir(this.options.root).then(
-            () => true,
-            (error: NodeJS.ErrnoException) => {
-                // Logged once: the folder check repeats every rootCheckIntervalMs.
-                if (error.code !== 'EEXIST' && error.message !== this.createError) {
-                    this.createError = error.message;
-                    this.logger.warn(`Cannot create the sync folder ${this.options.root}: ${error.message}`);
-                }
-                return false;
-            },
-        );
+        await mkdir(this.options.root).catch((error: NodeJS.ErrnoException) => {
+            // Logged once: the folder check repeats every rootCheckIntervalMs.
+            if (error.code !== 'EEXIST' && error.message !== this.createError) {
+                this.createError = error.message;
+                this.logger.warn(`Cannot create the sync folder ${this.options.root}: ${error.message}`);
+            }
+        });
         await writeFile(path.join(this.options.root, MARKER_NAME), 'Synced by Kation. Do not delete.\n', { flag: 'wx' }).catch(
             (error: NodeJS.ErrnoException) => {
                 if (error.code !== 'EEXIST' && error.code !== 'ENOENT') {
@@ -509,9 +514,6 @@ export class SyncEngine {
                 }
             },
         );
-        if (created && this.options.watch && this.watcher === undefined && this.rescanTimer !== undefined) {
-            this.startWatcher();
-        }
         return undefined;
     }
 
@@ -545,6 +547,17 @@ export class SyncEngine {
         const problem = await this.rootProblem();
         if (problem) {
             throw problem;
+        }
+    }
+
+    /**
+     * Before writing in the sync folder during a pass: its disk may have been unmounted
+     * since the pass began. Files written in the empty mount point and recorded as
+     * synced would be missing once the disk is back, and then trashed on Proton.
+     */
+    private async checkRootBeforeWrite(): Promise<void> {
+        if (!(await this.rootLooksValid())) {
+            await this.checkRoot();
         }
     }
 
@@ -836,10 +849,12 @@ export class SyncEngine {
                 // Deleted locally but changed on Proton since the last sync. Children still have their
                 // base: unchanged ones follow the deletion, changed ones are downloaded.
                 await this.reconcileFolder(context, 'list', true, true, errors);
+                await this.checkRootBeforeWrite();
                 await mkdir(this.absolute(itemPath), { recursive: true });
                 return;
             }
             // New remote folder.
+            await this.checkRootBeforeWrite();
             await mkdir(this.absolute(itemPath), { recursive: true });
             this.recordFolder(itemPath, remote.uid);
             await this.reconcileFolder(this.nodeContext(itemPath, remote.node ?? remote.uid), 'list', true, true, errors);
@@ -986,6 +1001,7 @@ export class SyncEngine {
         this.logger.info(`Downloading ${itemPath}`);
         this.setStatus({ current: itemPath });
         const node = remote.node ?? (await this.options.sdk.getNode(remote.uid));
+        await this.checkRootBeforeWrite();
         await mkdir(this.absolute(parentOf(itemPath)), { recursive: true });
         // A local edit saved while the download ran must not be overwritten: the next pass sees both changes.
         const beforeReplace = async () => {
@@ -1008,6 +1024,7 @@ export class SyncEngine {
             }
             throw error;
         }
+        await this.checkRootBeforeWrite();
         const local = await statItem(this.absolute(itemPath));
         if (!local) {
             throw new Error(`Downloaded file disappeared: ${itemPath}`);
@@ -1226,10 +1243,6 @@ export class SyncEngine {
             this.pauseFor(problem);
         } else if (!problem && waiting) {
             this.logger.info('The sync folder is back; resuming sync');
-            this.watcher?.close();
-            if (this.options.watch) {
-                this.startWatcher();
-            }
             this.setPaused(false);
         }
     }

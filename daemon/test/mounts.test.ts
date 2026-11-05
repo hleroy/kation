@@ -5,7 +5,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdir, realpath, symlink } from 'node:fs/promises';
 import path from 'node:path';
 
-import { type MountTable, parseFstab, parseMountInfo, resolveFolder, resolveMountPoint, unmountedMountPoint } from '../src/sync/mounts';
+import { type MountTable, parseFstab, parseMountInfo, readMountTable, resolveFolder, unmountedMountPoint } from '../src/sync/mounts';
 import { tempDir } from './helpers';
 
 const mountinfo = [
@@ -76,10 +76,22 @@ describe('mount point paths', () => {
         const top = await realpath(await tempDir());
         await mkdir(path.join(top, 'var', 'mnt', 'data'), { recursive: true });
         await symlink('var/mnt', path.join(top, 'mnt'));
-        expect(await resolveMountPoint(path.join(top, 'mnt', 'data'))).toBe(path.join(top, 'var', 'mnt', 'data'));
+        expect(await resolveFolder(path.join(top, 'mnt', 'data'), () => false)).toBe(path.join(top, 'var', 'mnt', 'data'));
         expect(await resolveFolder(path.join(top, 'mnt', 'data', 'Proton'), () => false)).toBe(
             path.join(top, 'var', 'mnt', 'data', 'Proton'),
         );
+    });
+
+    it('resolves a mount point that is itself a link', async () => {
+        // As /home -> var/home on Fedora Atomic, if fstab names /home.
+        const top = await realpath(await tempDir());
+        await mkdir(path.join(top, 'var', 'home'), { recursive: true });
+        await symlink('var/home', path.join(top, 'home'));
+        const mountInfo = `30 1 0:40 /home ${top}/var/home rw,relatime shared:2 - btrfs /dev/sda2 rw\n`;
+        const table = await readMountTable(mountInfo, `UUID=abc ${top}/home btrfs subvol=home 0 0\n`);
+        expect(table.declared).toEqual([path.join(top, 'var', 'home')]);
+        const folder = await resolveFolder(path.join(top, 'home', 'ana', 'Proton'), () => false);
+        expect(unmountedMountPoint(folder, table, 'ana')).toBeUndefined();
     });
 
     it('follows links one component at a time, as the kernel does', async () => {

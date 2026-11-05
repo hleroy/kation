@@ -690,6 +690,57 @@ describe('SyncEngine', () => {
         expect(child(ctx.fake, ctx.fake.rootUid, 'a.txt')).toBeDefined();
     });
 
+    it('does not download into the mount point once the disk is unmounted mid-pass', async () => {
+        let disk: string | undefined;
+        const fake = new FakeDrive({ chunkDelayMs: 40 });
+        for (let i = 0; i < 20; i++) {
+            fake.add({ parentUid: fake.rootUid, name: `file${i}.txt`, type: NodeType.File, content: `content ${i}` });
+        }
+        // The disk is mounted at Data; the folder check does not run during the test.
+        const root = path.join(await tempDir(), 'Data', 'Proton Drive');
+        await mkdir(path.dirname(root));
+        const ctx = await setup({ fake, root, unmountedDisk: async () => disk, rootCheckIntervalMs: 60_000 });
+        await ctx.engine.start();
+        for (let i = 0; i < 100 && ctx.engine.getStatus().current === ''; i++) {
+            await Bun.sleep(5);
+        }
+        const away = `${root}-on-disk`;
+        await rename(root, away);
+        disk = path.dirname(root);
+        for (let i = 0; i < 100 && ctx.engine.getStatus().state !== 'paused'; i++) {
+            await Bun.sleep(20);
+        }
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'notMounted' });
+        expect(await stat(root).catch(() => undefined)).toBeUndefined();
+    });
+
+    it('watches the folder after resuming a pause that began while the disk was missing', async () => {
+        const fake = new FakeDrive();
+        fake.add({ parentUid: fake.rootUid, name: 'precious.txt', type: NodeType.File, content: 'x' });
+        const stateFile = path.join(await tempDir(), 'sync.sqlite');
+        const first = await setup({ fake, stateFile });
+        await first.engine.start();
+        await first.settle();
+        await first.engine.stop();
+        first.stop();
+
+        // Paused at login, before the disk is mounted; the user resumes once it is.
+        let disk: string | undefined = '/mnt/data';
+        const ctx = await setup({ fake, stateFile, root: first.root, watch: true, unmountedDisk: async () => disk });
+        await ctx.engine.start(true);
+        disk = undefined;
+        ctx.engine.setPaused(false);
+        await ctx.settle();
+        expect(ctx.engine.getStatus().state).toBe('idle');
+
+        await edit(ctx.local('after.txt'), 'after');
+        for (let i = 0; i < 100 && !child(ctx.fake, ctx.fake.rootUid, 'after.txt'); i++) {
+            await Bun.sleep(20);
+        }
+        expect(child(ctx.fake, ctx.fake.rootUid, 'after.txt')).toBeDefined();
+    });
+
     it('creates the sync folder but not missing parent folders', async () => {
         const root = path.join(await tempDir(), 'Absent', 'Proton Drive');
         const ctx = await setup({ root });
