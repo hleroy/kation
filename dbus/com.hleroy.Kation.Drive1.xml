@@ -119,7 +119,9 @@
       was replaced, "notMounted" the sync folder is on a disk that is not
       mounted, "account" signed in to another account than the folder's,
       "signedOut" sync is on but nobody is signed in, "items" some items
-      could not be synced, "" see message), deletionLimit u, current s (path
+      could not be synced, "links" items are not synced because a symbolic
+      link or special file in the sync folder has their name, "" see
+      message), deletionLimit u, current s (path
       being transferred), pending u (folders waiting), lastSync x (seconds
       since the epoch, 0 if never),
       uploadLimit u, downloadLimit u (KiB/s for all transfers, 0: unlimited).
@@ -158,7 +160,7 @@
       the Proton trash), "trashedLocal" (deleted on Proton, moved to the
       desktop Trash), "conflict" or "error"), path s (in "My files"),
       localPath s, detail s (conflict: the copy kept, as a path in "My files";
-      error: the message).
+      error: the message, or "" when the sync status reason words it).
     -->
     <method name="GetRecentActivity">
       <arg name="activity" type="aa{sv}" direction="out"/>

@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: kation 0.1.0\n"
+"Project-Id-Version: kation 0.2.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-04 21:38+0100\n"
+"POT-Creation-Date: 2026-11-07 13:30+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -265,6 +265,14 @@ msgstr ""
 #: kde/dbus/kationtexts.cpp
 #, kde-format
 msgid "Some items could not be synced."
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"A symbolic link in the sync folder has the same name as an item in Proton "
+"Drive. Kation does not sync symbolic links, so that item is not synced "
+"either: rename or remove the link."
 msgstr ""
 
 #: kde/dbus/kationtexts.cpp

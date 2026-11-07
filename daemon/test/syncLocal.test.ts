@@ -5,7 +5,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { conflictName, isIgnoredName, moveToTrash, scanFolder } from '../src/sync/local';
+import { conflictName, isIgnoredName, isLinkOrSpecial, moveToTrash, scanFolder } from '../src/sync/local';
 import { childPath, nameOf, parentOf, SyncState } from '../src/sync/state';
 import { tempDir } from './helpers';
 
@@ -38,6 +38,18 @@ describe('local helpers', () => {
         expect(items.get('a.txt')).toMatchObject({ type: 'file', size: 3 });
         expect(items.get('sub')).toMatchObject({ type: 'folder' });
         expect((await scanFolder(path.join(dir, 'missing'))).size).toBe(0);
+    });
+
+    it('tells symbolic links from files, folders and missing paths', async () => {
+        const dir = await tempDir();
+        await writeFile(path.join(dir, 'a.txt'), 'abc');
+        await mkdir(path.join(dir, 'sub'));
+        await symlink(path.join(dir, 'sub'), path.join(dir, 'link'));
+        expect(await isLinkOrSpecial(path.join(dir, 'link'))).toBe(true);
+        expect(await isLinkOrSpecial(path.join(dir, 'a.txt'))).toBe(false);
+        expect(await isLinkOrSpecial(path.join(dir, 'sub'))).toBe(false);
+        expect(await isLinkOrSpecial(path.join(dir, 'missing'))).toBe(false);
+        expect(await isLinkOrSpecial(path.join(dir, 'a.txt', 'below'))).toBe(false);
     });
 
     it('moves items to the freedesktop trash with restore information', async () => {

@@ -79,6 +79,20 @@ export async function statItem(absolutePath: string): Promise<LocalItem | undefi
     }
 }
 
+/** Whether a path is a symbolic link or a special file (false if nothing is there). */
+export async function isLinkOrSpecial(absolutePath: string): Promise<boolean> {
+    try {
+        const info = await lstat(absolutePath);
+        return !info.isFile() && !info.isDirectory();
+    } catch (error: unknown) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR') {
+            return false;
+        }
+        throw error;
+    }
+}
+
 /**
  * Moves a file or folder to the desktop trash (freedesktop.org Trash
  * specification), so it can be restored from Dolphin: the home trash, or the

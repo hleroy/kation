@@ -35,6 +35,11 @@ QString Kation::syncReasonText(const QVariantMap &syncStatus)
     if (reason == QLatin1String("items")) {
         return i18n("Some items could not be synced.");
     }
+    if (reason == QLatin1String("links")) {
+        return i18n(
+            "A symbolic link in the sync folder has the same name as an item in Proton Drive. Kation does not sync symbolic links, so that item is not "
+            "synced either: rename or remove the link.");
+    }
     // An error from Proton Drive, or a reason this version does not know.
     return syncStatus.value(QStringLiteral("message")).toString();
 }
