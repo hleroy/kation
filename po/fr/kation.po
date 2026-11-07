@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kation 0.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-04 21:38+0100\n"
+"POT-Creation-Date: 2026-11-07 13:30+0100\n"
 "PO-Revision-Date: 2026-11-01 23:30+0100\n"
 "Last-Translator: Kation contributors\n"
 "Language-Team: French <kde-francophone@kde.org>\n"
@@ -258,8 +258,8 @@ msgid ""
 "The sync folder %1 is on a disk that is not mounted. Mount the disk and sync "
 "starts by itself."
 msgstr ""
-"Le dossier synchronisé %1 se trouve sur un disque qui n'est pas monté. Montez "
-"le disque et la synchronisation démarrera d'elle-même."
+"Le dossier synchronisé %1 se trouve sur un disque qui n'est pas monté. "
+"Montez le disque et la synchronisation démarrera d'elle-même."
 
 #: kde/dbus/kationtexts.cpp
 #, kde-format
@@ -281,6 +281,17 @@ msgstr "Connectez-vous pour synchroniser."
 #, kde-format
 msgid "Some items could not be synced."
 msgstr "Certains éléments n'ont pas pu être synchronisés."
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"A symbolic link in the sync folder has the same name as an item in Proton "
+"Drive. Kation does not sync symbolic links, so that item is not synced "
+"either: rename or remove the link."
+msgstr ""
+"Un lien symbolique du dossier synchronisé porte le même nom qu'un élément de "
+"Proton Drive. Kation ne synchronise pas les liens symboliques, donc cet "
+"élément n'est pas synchronisé non plus : renommez ou supprimez le lien."
 
 #: kde/dbus/kationtexts.cpp
 #, kde-format

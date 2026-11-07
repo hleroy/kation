@@ -28,7 +28,7 @@ import { isFolder, nodeName } from '../service/entry';
 import { KationError, toKationError } from '../service/errors';
 import type { DriveSdk } from '../service/sdk';
 import type { DriveTree } from '../service/tree';
-import { conflictName, isIgnoredName, type LocalItem, MARKER_NAME, moveToTrash, scanFolder, statItem } from './local';
+import { conflictName, isIgnoredName, isLinkOrSpecial, type LocalItem, MARKER_NAME, moveToTrash, scanFolder, statItem } from './local';
 import { findUnmountedDisk } from './mounts';
 import { type BaseEntry, childPath, nameOf, parentOf, type SyncState } from './state';
 
@@ -41,10 +41,11 @@ export type SyncPhase = 'disabled' | 'idle' | 'syncing' | 'paused' | 'error';
  * missing or was replaced), "notMounted" (the sync folder is on a disk that is
  * not mounted), "account" (signed in to another account than the one the folder
  * was synced with), "signedOut" (sync is on but nobody is signed in), "items"
- * (some items could not be synced, with no error message), or "" (none of
- * these: see message).
+ * (some items could not be synced, with no error message), "links" (items are
+ * not synced because a symbolic link or special file in the sync folder has
+ * their name), or "" (none of these: see message).
  */
-export type SyncReason = '' | 'user' | 'deletions' | 'folder' | 'notMounted' | 'account' | 'signedOut' | 'items';
+export type SyncReason = '' | 'user' | 'deletions' | 'folder' | 'notMounted' | 'account' | 'signedOut' | 'items' | 'links';
 
 /** Default for SyncEngineOptions.maxDeletionsPerPass. */
 export const DEFAULT_MAX_DELETIONS_PER_PASS = 100;
@@ -143,6 +144,9 @@ class SafetyPause extends Error {
 /** The local file changed while its new version was downloading. */
 class LocalChangedDuringDownload extends Error {}
 
+/** A symbolic link or special file has the name of a remote item: Kation neither follows nor replaces it. */
+class LinkInTheWay extends Error {}
+
 type Callbacks = 'onStatus' | 'onActivity' | 'onItemsChanged';
 
 /** State key: the kind of safety pause ('folder' or 'account') sync is stuck in, until a pass succeeds. */
@@ -173,6 +177,8 @@ export class SyncEngine {
     private failedItems = new Set<string>();
     /** Items that failed with "not found" once; a second failure is reported as an error. */
     private notFoundRetried = new Set<string>();
+    /** An item was skipped in this pass for a link with its name (reason "links"). */
+    private linkInTheWay = false;
     /** Set when the user resumes after a deletion safety pause: the next pass may delete. */
     private allowMassDeletion = false;
     private pausedFor?: SafetyPause['kind'];
@@ -362,6 +368,7 @@ export class SyncEngine {
         this.dirty = new Map();
         this.freshFolders = new Set([...dirty].filter(([, fresh]) => fresh).map(([folder]) => folder));
         this.deletionsThisPass = 0;
+        this.linkInTheWay = false;
         this.abort = new AbortController();
         const abort = this.abort;
         this.logger.info(
@@ -408,11 +415,16 @@ export class SyncEngine {
             }
             this.retryDelayMs = Math.min(Math.max(this.retryDelayMs * 2, 5000), MAX_RETRY_DELAY_MS);
             const message = this.status.message;
+            const reason: SyncReason = message ? '' : this.linkInTheWay ? 'links' : 'items';
             this.setStatus({
                 state: 'error',
                 current: '',
-                message: message || 'Some items could not be synced',
-                reason: message ? '' : 'items',
+                message:
+                    message ||
+                    (reason === 'links'
+                        ? 'A symbolic link in the sync folder has the name of an item in Proton Drive; rename or remove it to sync that item'
+                        : 'Some items could not be synced'),
+                reason,
             });
             this.schedule(this.retryDelayMs);
             return;
@@ -579,6 +591,11 @@ export class SyncEngine {
                 this.options.state.removePending(folder);
                 return this.syncFolderAt(parentOf(folder), fresh, false);
             }
+            if (await this.throughLink(folder)) {
+                // Replaced here by a symbolic link, or inside one: never synced through, its parent reports it.
+                this.options.state.removePending(folder);
+                return this.syncFolderAt(parentOf(folder), fresh, false);
+            }
             if (fresh) {
                 const remote = await this.getNodeOrUndefined(base.remoteUid);
                 if (!remote || remote.trashTime) {
@@ -647,7 +664,7 @@ export class SyncEngine {
         }
         this.abort.signal.throwIfAborted();
 
-        this.checkDeletionCount(folder, base, local, remote);
+        await this.checkDeletionCount(folder, base, local, remote);
         const names = [...new Set([...base.keys(), ...local.keys(), ...remote.keys()])].sort();
         for (const name of names) {
             this.abort.signal.throwIfAborted();
@@ -674,11 +691,18 @@ export class SyncEngine {
                     this.markDirty(folder, true);
                     continue;
                 }
-                this.logger.error(`Failed to sync ${itemPath}`, error);
-                this.status.message = `${itemPath}: ${kationError.message}`;
+                const linked = error instanceof LinkInTheWay;
+                if (linked) {
+                    this.logger.warn(`Not syncing ${itemPath}: ${kationError.message}`);
+                    this.linkInTheWay = true;
+                } else {
+                    this.logger.error(`Failed to sync ${itemPath}`, error);
+                    this.status.message = `${itemPath}: ${kationError.message}`;
+                }
                 if (!this.failedItems.has(itemPath)) {
                     this.failedItems.add(itemPath);
-                    this.activity('error', itemPath, kationError.message);
+                    // The KDE side words link problems from the "links" reason, not from an English detail.
+                    this.activity('error', itemPath, linked ? '' : kationError.message);
                     this.options.onItemsChanged?.([itemPath]);
                 }
                 if (!errors.includes(folder)) {
@@ -750,6 +774,13 @@ export class SyncEngine {
                 this.options.state.removeTree(itemPath);
             }
             return;
+        }
+        if (!local && remote && (await isLinkOrSpecial(this.absolute(itemPath)))) {
+            // Not a local deletion either. Without its base, removing the link later brings the item back instead of trashing it.
+            if (base) {
+                this.options.state.removeTree(itemPath);
+            }
+            throw new LinkInTheWay('A symbolic link or special file has this name in the sync folder');
         }
 
         const localChanged = hasLocalChange(local, base);
@@ -1060,20 +1091,26 @@ export class SyncEngine {
      * limit. Counts every synced item now missing on one side; some of them may turn out
      * to be kept (changed on the other side), so this errs towards pausing.
      */
-    private checkDeletionCount(
+    private async checkDeletionCount(
         folder: string,
         base: Map<string, BaseEntry>,
         local: Map<string, LocalItem>,
         remote: Map<string, RemoteItem>,
-    ): void {
+    ): Promise<void> {
         if (this.allowMassDeletion) {
             return;
         }
         let candidates = 0;
         for (const name of base.keys()) {
-            if (local.has(name) !== remote.has(name) && !isIgnoredName(name) && !this.isExcluded(childPath(folder, name))) {
-                candidates++;
+            const itemPath = childPath(folder, name);
+            if (local.has(name) === remote.has(name) || isIgnoredName(name) || this.isExcluded(itemPath)) {
+                continue;
             }
+            // A link with the item's name is reported, not deleted (see reconcileItem).
+            if (!local.has(name) && (await isLinkOrSpecial(this.absolute(itemPath)).catch(() => false))) {
+                continue;
+            }
+            candidates++;
         }
         if (this.deletionsThisPass + candidates > this.options.maxDeletionsPerPass) {
             throw this.massDeletionPause();
@@ -1218,6 +1255,19 @@ export class SyncEngine {
             throw new KationError('InvalidArgument', `Refusing a path outside the sync folder: ${itemPath}`);
         }
         return absolutePath;
+    }
+
+    /** Whether a folder's local path goes through a symbolic link (or special file) inside the sync folder. */
+    private async throughLink(folder: string): Promise<boolean> {
+        let current = '/';
+        for (const name of folder.split('/').filter(Boolean)) {
+            current = childPath(current, name);
+            // An unreadable path is not a link: scanning the folder reports it, for that folder only.
+            if (await isLinkOrSpecial(this.absolute(current)).catch(() => false)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

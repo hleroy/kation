@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { NodeType } from '@protontech/drive-sdk';
@@ -85,6 +85,13 @@ async function edit(file: string, content: string) {
     await writeFile(file, content);
     const past = new Date(Date.now() - 60_000 - ++editCount * 1000);
     await utimes(file, past, past);
+}
+
+/** A failed pass is retried later, so wait for the error rather than for idleness. */
+async function untilError(engine: SyncEngine) {
+    for (let i = 0; i < 100 && engine.getStatus().state !== 'error'; i++) {
+        await Bun.sleep(10);
+    }
 }
 
 function child(fake: FakeDrive, parentUid: string, name: string) {
@@ -848,6 +855,128 @@ describe('SyncEngine', () => {
 
         expect(ctx.engine.getStatus().state).toBe('idle');
         expect(await readFile(path.join(target, 'a.txt'), 'utf8')).toBe('a');
+    });
+
+    it('never syncs through a symbolic link that has the name of a remote folder', async () => {
+        const activity: string[] = [];
+        const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`.trim()) });
+        const outside = await tempDir();
+        await writeFile(path.join(outside, 'private.txt'), 'not for Proton');
+        await mkdir(ctx.root, { recursive: true });
+        await symlink(outside, ctx.local('Notes'));
+        // No remote item has this name: skipped silently.
+        await symlink(outside, ctx.local('Other'));
+        const notes = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Notes', type: NodeType.Folder });
+        ctx.fake.add({ parentUid: notes.uid, name: 'remote.txt', type: NodeType.File, content: 'remote' });
+
+        await ctx.engine.start();
+        await untilError(ctx.engine);
+
+        expect([...ctx.fake.childrenOf(notes.uid).keys()]).toEqual(['remote.txt']);
+        expect(await readdir(outside)).toEqual(['private.txt']);
+        expect((await lstat(ctx.local('Notes'))).isSymbolicLink()).toBe(true);
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'links' });
+        expect(activity).toEqual(['error /Notes']);
+        expect(await ctx.engine.itemState('/Notes')).toBe('error');
+
+        await rm(ctx.local('Notes'));
+        ctx.engine.syncNow();
+        await ctx.settle();
+        expect(await readFile(ctx.local('Notes/remote.txt'), 'utf8')).toBe('remote');
+        expect(ctx.engine.getStatus().state).toBe('idle');
+        expect(child(ctx.fake, ctx.fake.rootUid, 'Other')).toBeUndefined();
+    });
+
+    it('never replaces a symbolic link that has the name of a remote file', async () => {
+        const ctx = await setup();
+        const target = path.join(await tempDir(), 'target.txt');
+        await writeFile(target, 'mine');
+        await mkdir(ctx.root, { recursive: true });
+        await symlink(target, ctx.local('a.txt'));
+        const file = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'a.txt', type: NodeType.File, content: 'remote' });
+
+        await ctx.engine.start();
+        await untilError(ctx.engine);
+
+        expect((await lstat(ctx.local('a.txt'))).isSymbolicLink()).toBe(true);
+        expect(await readFile(target, 'utf8')).toBe('mine');
+        expect(ctx.fake.contentOf(file.uid)).toBe('remote');
+        expect(ctx.engine.getStatus().reason).toBe('links');
+    });
+
+    it('keeps the remote copy of a synced folder replaced by a symbolic link', async () => {
+        const ctx = await setup();
+        const docs = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Docs', type: NodeType.Folder });
+        ctx.fake.add({ parentUid: docs.uid, name: 'a.txt', type: NodeType.File, content: 'v1' });
+        await ctx.engine.start();
+        await ctx.settle();
+
+        // Moved to another disk and linked back.
+        const moved = path.join(await tempDir(), 'Docs');
+        await rename(ctx.local('Docs'), moved);
+        await symlink(moved, ctx.local('Docs'));
+        ctx.engine.syncNow();
+        await untilError(ctx.engine);
+
+        expect(docs.trashed).toBeUndefined();
+        expect(await readdir(moved)).toEqual(['a.txt']);
+        expect(ctx.engine.getStatus().reason).toBe('links');
+
+        // Removing the link, as the message says, brings the folder back instead of trashing it.
+        await rm(ctx.local('Docs'));
+        ctx.engine.syncNow();
+        await ctx.settle();
+        expect(docs.trashed).toBeUndefined();
+        expect(await readFile(ctx.local('Docs/a.txt'), 'utf8')).toBe('v1');
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('does not follow a symbolic link to sync a remote change in a synced folder', async () => {
+        const ctx = await setup();
+        const docs = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Docs', type: NodeType.Folder });
+        const file = ctx.fake.add({ parentUid: docs.uid, name: 'a.txt', type: NodeType.File, content: 'v1' });
+        await ctx.engine.start();
+        await ctx.settle();
+
+        const moved = path.join(await tempDir(), 'Docs');
+        await rename(ctx.local('Docs'), moved);
+        await symlink(moved, ctx.local('Docs'));
+        // The event marks /Docs for syncing by its path, which now goes through the link.
+        ctx.fake.updateContent(file.uid, 'v2');
+        await untilError(ctx.engine);
+
+        expect(await readFile(path.join(moved, 'a.txt'), 'utf8')).toBe('v1');
+        expect(docs.trashed).toBeUndefined();
+        expect(ctx.engine.getStatus().reason).toBe('links');
+
+        // Moved back: the remote change is not lost.
+        await rm(ctx.local('Docs'));
+        await rename(moved, ctx.local('Docs'));
+        ctx.engine.syncNow();
+        await ctx.settle();
+        expect(await readFile(ctx.local('Docs/a.txt'), 'utf8')).toBe('v2');
+    });
+
+    it('does not count links as deletions for the mass-deletion guard', async () => {
+        const ctx = await setup({ maxDeletionsPerPass: 2 });
+        const names = ['a.txt', 'b.txt', 'c.txt'];
+        for (const name of names) {
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name, type: NodeType.File, content: name });
+        }
+        await ctx.engine.start();
+        await ctx.settle();
+
+        // What deduplication tools do.
+        const elsewhere = await tempDir();
+        for (const name of names) {
+            await rename(ctx.local(name), path.join(elsewhere, name));
+            await symlink(path.join(elsewhere, name), ctx.local(name));
+        }
+        ctx.engine.syncNow();
+        await untilError(ctx.engine);
+
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'links' });
+        expect(names.map((name) => child(ctx.fake, ctx.fake.rootUid, name)?.trashed)).toEqual([undefined, undefined, undefined]);
     });
 
     it('preserves modification times of downloads', async () => {

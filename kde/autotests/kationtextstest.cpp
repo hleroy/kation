@@ -55,6 +55,9 @@ void KationTextsTest::syncReasons_data()
                                 u"sync this folder with the current account instead."_s;
     QTest::newRow("signedOut") << with(u"signedOut"_s) << u"Sign in to sync."_s;
     QTest::newRow("items") << with(u"items"_s) << u"Some items could not be synced."_s;
+    QTest::newRow("links") << with(u"links"_s)
+                           << u"A symbolic link in the sync folder has the same name as an item in Proton Drive. Kation does not sync symbolic links, so "
+                              u"that item is not synced either: rename or remove the link."_s;
     QTest::newRow("error from Proton") << with(QString()) << u"English message"_s;
     QTest::newRow("newer reason") << with(u"somethingNew"_s) << u"English message"_s;
 }

@@ -25,6 +25,14 @@ Kation tray, window, System Settings ────────────┼─D
   and KDE Frameworks 6, and none of them talks to Proton directly.
 - The D-Bus interface between them is described in
   [dbus/com.hleroy.Kation.Drive1.xml](dbus/com.hleroy.Kation.Drive1.xml).
+  kationd serves it on the session bus only and trusts every caller there:
+  any program running as the user can call any method, including `Upload`
+  and `Download` with any local path. That gives such a program nothing it
+  could not already do, since it can read the user's files and keyring
+  directly. Checking callers' bus names would not help, as any program can
+  own any name on the session bus. Sandboxed apps (Flatpak) reach kationd
+  only when granted `--talk-name=com.hleroy.Kation` or the whole session
+  bus. Never serve the interface beyond the session bus.
 
 ## Getting the source and the dependencies
 

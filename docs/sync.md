@@ -20,6 +20,10 @@ directions. It is off until you turn it on in the Kation window.
   Proton Drive as it is online, whether sync is paused or not.
 - Temporary files (`*.part`, `.~lock.*`, `*~`, …) and Proton Docs and Sheets,
   which exist only online, are not synced.
+- Symbolic links inside the sync folder are not synced, and Kation never
+  reads or writes through them. If one has the same name as an item in
+  Proton Drive, that item is not synced either until you rename or remove
+  the link. The sync folder itself can be a symbolic link.
 - Renaming or moving a file is synced as a new file plus a deletion, so the
   file is transferred again.
 
