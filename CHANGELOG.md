@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `kationd` no longer runs code or reads settings from the folder it is started in (`bunfig.toml`, `.env`, `node_modules`): a file planted in a synced or downloaded folder could run code when a `kationd` command was run there.
+
 ### Fixed
 
 - Sync no longer reads or writes through a symbolic link in the sync folder that has the name of an item in Proton Drive (it uploaded the link target's files and downloaded into it), nor trashes the Proton copy of a synced folder replaced by a link; it reports the link instead.
