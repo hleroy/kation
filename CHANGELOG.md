@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - `kationd` no longer runs code or reads settings from the folder it is started in (`bunfig.toml`, `.env`, `node_modules`): a file planted in a synced or downloaded folder could run code when a `kationd` command was run there.
+- `protondrive:/` takes a file's type from its name, so a file such as `photo.jpg` no longer opens in the application for whatever type its uploader claimed (a Java archive, for example). A file whose name gives no type keeps its stored type only when that is plain text, Markdown or CSV; other such files show as unknown and open with "Open With".
 
 ### Fixed
 

@@ -5,6 +5,7 @@ kcoreaddons_add_plugin(kio_protondrive INSTALL_NAMESPACE "kf6/kio")
 target_sources(kio_protondrive PRIVATE
     protondriveworker.cpp
     errors.cpp
+    mimetypes.cpp
 )
 ecm_qt_declare_logging_category(kio_protondrive
     HEADER logging.h

@@ -79,6 +79,7 @@ private Q_SLOTS:
     void copiesLocalFilesBothWays();
     void listsFolderContent();
     void renamesAndMoves();
+    void reportsTypesFromNames();
     void copiesFolderTrees();
     void deletesFoldersRecursively();
     void reportsMissingFiles();
@@ -237,6 +238,41 @@ void KioWorkerTest::renamesAndMoves()
     KIO::StoredTransferJob *get = KIO::storedGet(driveUrl(u"/moved.txt"_s), KIO::NoReload, KIO::HideProgressInfo);
     QVERIFY2(get->exec(), qPrintable(get->errorString()));
     QCOMPARE(get->data(), QByteArray("bye"));
+}
+
+void KioWorkerTest::reportsTypesFromNames()
+{
+    // A rename keeps the stored type, like a client that uploads with any type it likes.
+    const QUrl payload = driveUrl(u"/payload.jar"_s);
+    KIO::StoredTransferJob *put = KIO::storedPut(QByteArray("PK"), payload, -1, KIO::HideProgressInfo);
+    QVERIFY2(put->exec(), qPrintable(put->errorString()));
+    QDBusPendingReply<QVariantMap> stored = m_drive->Stat(u"/payload.jar"_s);
+    stored.waitForFinished();
+    QVERIFY2(!stored.isError(), qPrintable(stored.error().message()));
+    QCOMPARE(stored.value().value(u"mimeType"_s).toString(), u"application/java-archive"_s);
+    const QUrl photo = driveUrl(u"/photo.jpg"_s);
+    KIO::SimpleJob *rename = KIO::rename(payload, photo, KIO::HideProgressInfo);
+    QVERIFY2(rename->exec(), qPrintable(rename->errorString()));
+
+    KIO::StatJob *stat = KIO::stat(photo, KIO::HideProgressInfo);
+    QVERIFY2(stat->exec(), qPrintable(stat->errorString()));
+    QCOMPARE(stat->statResult().stringValue(KIO::UDSEntry::UDS_MIME_TYPE), u"image/jpeg"_s);
+    KIO::StoredTransferJob *get = KIO::storedGet(photo, KIO::NoReload, KIO::HideProgressInfo);
+    QVERIFY2(get->exec(), qPrintable(get->errorString()));
+    QCOMPARE(get->mimetype(), u"image/jpeg"_s);
+
+    const QUrl setup = driveUrl(u"/setup"_s);
+    KIO::SimpleJob *strip = KIO::rename(photo, setup, KIO::HideProgressInfo);
+    QVERIFY2(strip->exec(), qPrintable(strip->errorString()));
+    KIO::StatJob *statSetup = KIO::stat(setup, KIO::HideProgressInfo);
+    QVERIFY2(statSetup->exec(), qPrintable(statSetup->errorString()));
+    QCOMPARE(statSetup->statResult().stringValue(KIO::UDSEntry::UDS_MIME_TYPE), u"application/octet-stream"_s);
+    KIO::StoredTransferJob *getSetup = KIO::storedGet(setup, KIO::NoReload, KIO::HideProgressInfo);
+    QVERIFY2(getSetup->exec(), qPrintable(getSetup->errorString()));
+    QCOMPARE(getSetup->mimetype(), u"application/octet-stream"_s);
+
+    KIO::DeleteJob *del = KIO::del(setup, KIO::HideProgressInfo);
+    QVERIFY2(del->exec(), qPrintable(del->errorString()));
 }
 
 void KioWorkerTest::copiesFolderTrees()
