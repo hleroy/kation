@@ -9,41 +9,85 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { computeVersions } from './versions';
+import type { BunPlugin } from 'bun';
+
+import { computeVersions, type Versions } from './versions';
 
 const DAEMON_DIR = path.resolve(import.meta.dir, '..');
 
-const { values } = parseArgs({
-    options: {
-        outfile: { type: 'string', default: path.join(DAEMON_DIR, 'dist', 'kationd') },
-        target: { type: 'string', default: 'bun' },
+// Optional native modules of dbus-next, never shipped. Left out of the bundle, they would be
+// looked up at run time in node_modules of the directory kationd is started from, and run.
+const ABSENT_MODULES: Record<string, string> = {
+    usocket: 'throw new Error("abstract D-Bus socket addresses are not supported");',
+    x11: 'module.exports = null;',
+};
+
+/** Keeps kationd from loading code from disk when it runs: see test/build.test.ts. */
+const nothingFromDisk: BunPlugin = {
+    name: 'nothing-from-disk',
+    setup(build) {
+        const absent = new RegExp(`^(${Object.keys(ABSENT_MODULES).join('|')})$`);
+        build.onResolve({ filter: absent }, ({ path: name }) => ({ path: name, namespace: 'absent' }));
+        build.onLoad({ filter: /.*/, namespace: 'absent' }, ({ path: name }) => ({ contents: ABSENT_MODULES[name]!, loader: 'js' }));
+
+        // openpgp keeps a `require` for Node's own modules, and also asks it for eckey-utils,
+        // which is not installed: that one would be looked up on disk like the modules above.
+        build.onLoad({ filter: /[\\/]openpgp[\\/]dist[\\/]node[\\/]openpgp\.mjs$/ }, async ({ path: file }) => ({
+            contents: (await Bun.file(file).text()).replaceAll(
+                'createRequire(import.meta.url)',
+                '((name) => process.getBuiltinModule(name))',
+            ),
+            loader: 'js',
+        }));
     },
-});
+};
 
-const { appVersion, sdkVersion } = await computeVersions();
-console.log(`Building kationd: app=${appVersion} sdk=${sdkVersion}`);
+/** How kationd is bundled. */
+export function bundleConfig(versions: Versions): Bun.BuildConfig {
+    return {
+        entrypoints: [path.join(DAEMON_DIR, 'src', 'main.ts')],
+        target: 'bun',
+        format: 'esm',
+        plugins: [nothingFromDisk],
+        define: {
+            'process.env.NODE_ENV': JSON.stringify('production'),
+            KATION_APP_VERSION: JSON.stringify(versions.appVersion),
+            KATION_SDK_VERSION: JSON.stringify(versions.sdkVersion),
+        },
+    };
+}
 
-const proc = Bun.spawn(
-    [
-        process.execPath,
-        'build',
-        '--compile',
-        '--bytecode',
-        `--target=${values.target}`,
-        '--format=esm',
-        '--minify',
-        '--sourcemap=inline',
-        // Optional native modules of dbus-next. It falls back to plain sockets
-        // without usocket, and only needs x11 when no session bus address is set.
-        '--external=usocket',
-        '--external=x11',
-        '--define',
-        `KATION_APP_VERSION=${JSON.stringify(appVersion)}`,
-        '--define',
-        `KATION_SDK_VERSION=${JSON.stringify(sdkVersion)}`,
-        path.join(DAEMON_DIR, 'src', 'main.ts'),
-        `--outfile=${values.outfile}`,
-    ],
-    { cwd: DAEMON_DIR, stdio: ['inherit', 'inherit', 'inherit'], env: { ...process.env, NODE_ENV: 'production' } },
-);
-process.exit(await proc.exited);
+if (import.meta.main) {
+    const { values } = parseArgs({
+        options: {
+            outfile: { type: 'string', default: path.join(DAEMON_DIR, 'dist', 'kationd') },
+            target: { type: 'string', default: 'bun' },
+        },
+    });
+    // Source paths in the executable, and a relative --outfile, are relative to the working directory.
+    process.chdir(DAEMON_DIR);
+
+    const versions = await computeVersions();
+    console.log(`Building kationd: app=${versions.appVersion} sdk=${versions.sdkVersion}`);
+
+    // Bun.build throws when the build fails, which ends this script with an error.
+    const result = await Bun.build({
+        ...bundleConfig(versions),
+        compile: {
+            outfile: values.outfile,
+            ...(values.target === 'bun' ? {} : { target: values.target as Bun.Build.CompileTarget }),
+            // By default the executable loads bunfig.toml (which can preload scripts) and .env
+            // files from the directory it is started from. scripts/checkIsolation.ts checks this.
+            autoloadBunfig: false,
+            autoloadDotenv: false,
+            autoloadTsconfig: false,
+            autoloadPackageJson: false,
+        },
+        bytecode: true,
+        minify: true,
+        sourcemap: 'inline',
+    });
+    for (const log of result.logs) {
+        console.log(log);
+    }
+}
