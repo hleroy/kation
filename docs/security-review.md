@@ -13,9 +13,9 @@ and CI, and how Kation uses the pinned Proton SDK (`df3a717`).
 
 | ID | Severity | Finding | Status |
 |---|---|---|---|
-| H1 | High | `kationd` loads `bunfig.toml` and `.env` from the folder it is started in | Fixed |
-| H2 | High | `kationd` loads modules from `node_modules` of the folder it is started in | Fixed |
-| M1 | Medium | The online view opens a file with the application its uploader chose | Open, decision needed |
+| H1 | High | `kationd` loads `bunfig.toml` and `.env` from the folder it is started in | Fixed (#8) |
+| H2 | High | `kationd` loads modules from `node_modules` of the folder it is started in | Fixed (#8) |
+| M1 | Medium | The online view opens a file with the application its uploader chose | Fixed (#9) |
 | L1 to L14 | Low | See [Low](#low) | Open |
 
 No critical finding. Findings that only matter to a program already running as
@@ -33,8 +33,8 @@ the user (the trust rule in [DEVNOTES.md](../DEVNOTES.md)) are not listed.
 
 Limits: the KDE components could not be built in the review environment (no
 Qt 6 or KF6 packages), so findings in `kde/` come from reading the code, and
-KIO's behaviour from reading its source. Nothing was tested against a real
-Proton account.
+KIO's behaviour from reading its source. M1 was reproduced afterwards on a KDE
+desktop. Nothing was tested against a real Proton account.
 
 Attackers considered: someone who can put files in the user's drive (an editor
 of a shared folder), Proton's servers and the network, another user of the
@@ -63,7 +63,7 @@ planted `.env` set `KATION_CREDENTIALS_STORE`.
 Fix: the build disables the four start-up files Bun can load (`bunfig.toml`,
 `.env`, `tsconfig.json`, `package.json`). ctest's `kationd-isolated`
 (`daemon/scripts/checkIsolation.ts`) runs the built program in a folder with
-planted files and fails if one is loaded.
+planted files and fails if one is loaded. Merged in #8.
 
 ### H2. kationd loads modules from node_modules of the folder it is started in
 
@@ -89,7 +89,7 @@ Fix: the build replaces `usocket` and `x11` with stubs inside the program
 (dbus-next then uses a plain socket, as it already did in the packages), and
 limits OpenPGP's loader to the modules built into Bun.
 `daemon/test/build.test.ts` fails if the bundle can load anything else;
-`kationd-isolated` covers `usocket` on the built program.
+`kationd-isolated` covers `usocket` on the built program. Merged in #8.
 
 ## Medium
 
@@ -109,17 +109,27 @@ in `protondrive:/` runs the attacker's code. The synced folder is not affected:
 local files get their type from their name and content.
 
 Needs: write access to a folder the user browses, a click, and a suitable
-application installed. Not reproduced (no KDE build here).
+application installed.
 
-Options:
+Reproduced on KDE Plasma (KIO 6.24, Ubuntu 24.04 base) with the fake drive: a
+`.jar` uploaded and renamed to `photo.jpg` kept its stored type, and opening
+`protondrive:/photo.jpg` launched the handler registered for Java archives.
+There, that handler goes through Ubuntu's `cautious-launcher`, which refuses
+files outside `/usr` and `/opt`, so the Java code did not run; distributions
+without that wrapper offer no such check.
 
-1. Derive the type from the file name and report `application/octet-stream`
-   when the extension is unknown, in `toEntry` (kationd already has
-   `mediaTypeOf` for uploads) or in the worker with `QMimeDatabase`.
-   Extensionless files then show as unknown.
-2. As 1, but keep the stored type when the name gives none and the stored type
-   is harmless (text, image, audio, video).
-3. Keep the behaviour and document it.
+Fix: the KIO worker takes a file's type from its name
+(`kde/kioworker/mimetypes.cpp`, with `QMimeDatabase`), for stat, listing and
+download alike. For an ambiguous extension such as `.ts`, a stored type among
+its candidates is kept. A name that gives no type keeps the stored type only
+when it is `text/plain`, `text/markdown` or `text/csv`; anything else is
+reported as `application/octet-stream`, so KIO asks which application to use.
+
+Stored image, audio and video types are not kept either: the uploader also
+controls the content, and viewers that detect the format from it would still
+pass EPS to Ghostscript (Gwenview's `kimg_eps`) or make a player fetch a
+playlist's URLs. Extensionless media files therefore open through "Open With".
+Merged in #9.
 
 ## Low
 
