@@ -24,6 +24,11 @@ add_dependencies(kationtextstest pofiles)
 find_program(MSGCMP_EXECUTABLE msgcmp REQUIRED)
 add_test(NAME po-check COMMAND "${PROJECT_SOURCE_DIR}/po/update.sh" --check)
 
+add_executable(mimetypestest mimetypestest.cpp ../kioworker/mimetypes.cpp)
+target_include_directories(mimetypestest PRIVATE ../kioworker)
+target_link_libraries(mimetypestest PRIVATE Qt6::Test)
+add_test(NAME kio-mime-types COMMAND mimetypestest)
+
 add_executable(kioworkertest kioworkertest.cpp)
 target_link_libraries(kioworkertest PRIVATE kation_dbus Qt6::Test KF6::KIOCore)
 target_compile_definitions(kioworkertest PRIVATE KATIOND_EXECUTABLE="${KATIOND_EXECUTABLE}")

@@ -7,6 +7,7 @@
 #include "kationdriveinterface.h"
 #include "kationtypes.h"
 #include "logging.h"
+#include "mimetypes.h"
 
 #include <KIO/UDSEntry>
 #include <KLocalizedString>
@@ -75,6 +76,12 @@ bool isFolder(const QVariantMap &entry)
     return entry.value(QStringLiteral("type")).toString() == QLatin1String("folder");
 }
 
+QString mimeTypeOf(const QVariantMap &entry)
+{
+    const QString stored = entry.value(QStringLiteral("mimeType")).toString();
+    return isFolder(entry) ? stored : Kation::fileMimeType(entry.value(QStringLiteral("name")).toString(), stored);
+}
+
 KIO::UDSEntry toUdsEntry(const QVariantMap &entry, const QString &nameOverride = QString())
 {
     KIO::UDSEntry uds;
@@ -83,7 +90,7 @@ KIO::UDSEntry toUdsEntry(const QVariantMap &entry, const QString &nameOverride =
     uds.fastInsert(KIO::UDSEntry::UDS_NAME, name);
     uds.fastInsert(KIO::UDSEntry::UDS_FILE_TYPE, folder ? S_IFDIR : S_IFREG);
     uds.fastInsert(KIO::UDSEntry::UDS_ACCESS, folder ? 0700 : 0600);
-    uds.fastInsert(KIO::UDSEntry::UDS_MIME_TYPE, entry.value(QStringLiteral("mimeType")).toString());
+    uds.fastInsert(KIO::UDSEntry::UDS_MIME_TYPE, mimeTypeOf(entry));
     const qlonglong size = entry.value(QStringLiteral("size")).toLongLong();
     if (!folder && size >= 0) {
         uds.fastInsert(KIO::UDSEntry::UDS_SIZE, size);
@@ -270,7 +277,7 @@ KIO::WorkerResult ProtonDriveWorker::get(const QUrl &url)
         return KIO::WorkerResult::fail(KIO::ERR_IS_DIRECTORY, url.toDisplayString());
     }
     // Announce the type early so applications can pick a handler.
-    mimeType(entry.value(QStringLiteral("mimeType")).toString());
+    mimeType(mimeTypeOf(entry));
     const qlonglong size = entry.value(QStringLiteral("size")).toLongLong();
     if (size >= 0) {
         totalSize(size);
