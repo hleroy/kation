@@ -102,7 +102,8 @@ jobs:
 
           ```sh
           sha256sum -c SHA256SUMS --ignore-missing
-          gh attestation verify <package file> --repo hleroy/kation
+          gh attestation verify <package file> --repo hleroy/kation \
+              --signer-workflow hleroy/kation/.github/workflows/release.yml
           ```
           EOF
           } > notes.md

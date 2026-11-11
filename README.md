@@ -39,21 +39,21 @@ The details are in [How folder sync works](docs/sync.md).
 
 Download the package for your distribution from the
 [latest release](https://github.com/hleroy/kation/releases/latest) and
-install it:
+install it. Releases after 0.2.0 come with `SHA256SUMS` and build
+provenance: check the package you downloaded first (the second command needs
+the GitHub CLI).
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify <package file> --repo hleroy/kation \
+    --signer-workflow hleroy/kation/.github/workflows/release.yml
+```
 
 ```sh
 sudo apt install ./kation_*_amd64.deb            # Debian 13
 sudo dnf install ./kation-*.fc43.x86_64.rpm      # Fedora 43
 sudo pacman -U kation-*-x86_64.pkg.tar.zst       # Arch Linux
 systemctl --user daemon-reload
-```
-
-Releases after 0.2.0 come with `SHA256SUMS` and build provenance. To check a
-downloaded package (the second command needs the GitHub CLI):
-
-```sh
-sha256sum -c SHA256SUMS --ignore-missing
-gh attestation verify kation_*_amd64.deb --repo hleroy/kation
 ```
 
 Each package is built for that distribution release. On another
