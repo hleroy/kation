@@ -65,6 +65,7 @@ async function setup(options: Partial<SyncEngineOptions> & { fake?: FakeDrive; s
     return {
         fake,
         sdk: counting.sdk,
+        drive,
         engine,
         state,
         root,
@@ -977,6 +978,56 @@ describe('SyncEngine', () => {
 
         expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'links' });
         expect(names.map((name) => child(ctx.fake, ctx.fake.rootUid, name)?.trashed)).toEqual([undefined, undefined, undefined]);
+    });
+
+    it('does not download through a folder swapped for a link during the pass', async () => {
+        const ctx = await setup();
+        const docs = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Docs', type: NodeType.Folder });
+        const file = ctx.fake.add({ parentUid: docs.uid, name: 'a.txt', type: NodeType.File, content: 'v1' });
+        await ctx.engine.start();
+        await ctx.settle();
+
+        // Swapped after the pass checked /Docs for links, while the file downloads.
+        const moved = path.join(await tempDir(), 'Docs');
+        const downloadNode = ctx.drive.downloadNode.bind(ctx.drive);
+        ctx.drive.downloadNode = async (...args) => {
+            ctx.drive.downloadNode = downloadNode;
+            await rename(ctx.local('Docs'), moved);
+            await symlink(moved, ctx.local('Docs'));
+            return downloadNode(...args);
+        };
+        ctx.fake.updateContent(file.uid, 'v2');
+        await untilError(ctx.engine);
+
+        expect(await readdir(moved)).toEqual(['a.txt']);
+        expect(await readFile(path.join(moved, 'a.txt'), 'utf8')).toBe('v1');
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'links' });
+    });
+
+    it('does not trash through a folder swapped for a link during the pass', async () => {
+        const ctx = await setup();
+        const docs = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Docs', type: NodeType.Folder });
+        const file = ctx.fake.add({ parentUid: docs.uid, name: 'a.txt', type: NodeType.File, content: 'v1' });
+        await ctx.engine.start();
+        await ctx.settle();
+
+        // Swapped after the pass scanned /Docs, while it lists the folder on Proton.
+        const moved = path.join(await tempDir(), 'Docs');
+        const list = ctx.fake.sdk.iterateFolderChildrenNodeUids;
+        ctx.fake.sdk.iterateFolderChildrenNodeUids = async function* (...args) {
+            ctx.fake.sdk.iterateFolderChildrenNodeUids = list;
+            await rename(ctx.local('Docs'), moved);
+            await symlink(moved, ctx.local('Docs'));
+            yield* list(...args);
+        };
+        for await (const result of ctx.fake.sdk.trashNodes([file.uid])) {
+            expect(result.ok).toBe(true);
+        }
+        await untilError(ctx.engine);
+
+        expect(await readdir(moved)).toEqual(['a.txt']);
+        expect(await ctx.trashed()).toEqual([]);
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'links' });
     });
 
     it('preserves modification times of downloads', async () => {

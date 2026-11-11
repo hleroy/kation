@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { describe, expect, it } from 'bun:test';
-import { mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { conflictName, isIgnoredName, isLinkOrSpecial, moveToTrash, scanFolder } from '../src/sync/local';
+import { conflictName, isIgnoredName, isLinkOrSpecial, moveToTopDirTrash, moveToTrash, scanFolder } from '../src/sync/local';
 import { childPath, nameOf, parentOf, SyncState } from '../src/sync/state';
 import { tempDir } from './helpers';
 
@@ -64,6 +64,61 @@ describe('local helpers', () => {
         const info = await readFile(path.join(home, 'Trash', 'info', 'my file.txt.trashinfo'), 'utf8');
         expect(info).toContain(`Path=${dir.split('/').map(encodeURIComponent).join('/')}/my%20file.txt`);
         expect(info).toMatch(/DeletionDate=\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/);
+    });
+
+    describe('trash on another disk', () => {
+        const trashName = `.Trash-${process.getuid!()}`;
+
+        it('creates a private trash folder and moves the item into it', async () => {
+            const topDir = await tempDir();
+            const file = path.join(topDir, 'sub', 'a.txt');
+            await mkdir(path.dirname(file));
+            await writeFile(file, 'x');
+            await moveToTopDirTrash(file, topDir);
+            const trash = path.join(topDir, trashName);
+            for (const folder of [trash, path.join(trash, 'files'), path.join(trash, 'info')]) {
+                expect((await stat(folder)).mode & 0o777).toBe(0o700);
+            }
+            expect(await readdir(path.join(trash, 'files'))).toEqual(['a.txt']);
+            expect(await readFile(path.join(trash, 'info', 'a.txt.trashinfo'), 'utf8')).toContain('Path=sub/a.txt');
+        });
+
+        it('refuses a trash folder that is a symbolic link', async () => {
+            const topDir = await tempDir();
+            const elsewhere = await tempDir();
+            await chmod(elsewhere, 0o700);
+            await symlink(elsewhere, path.join(topDir, trashName));
+            const file = path.join(topDir, 'a.txt');
+            await writeFile(file, 'x');
+            await expect(moveToTopDirTrash(file, topDir)).rejects.toThrow('cannot be trusted');
+            expect(await readFile(file, 'utf8')).toBe('x');
+            expect(await readdir(elsewhere)).toEqual([]);
+        });
+
+        it('refuses a trash folder that others can write to', async () => {
+            const topDir = await tempDir();
+            const trash = path.join(topDir, trashName);
+            await mkdir(trash);
+            await chmod(trash, 0o777);
+            const file = path.join(topDir, 'a.txt');
+            await writeFile(file, 'x');
+            await expect(moveToTopDirTrash(file, topDir)).rejects.toThrow('cannot be trusted');
+            expect(await readFile(file, 'utf8')).toBe('x');
+            expect(await readdir(trash)).toEqual([]);
+        });
+
+        it('refuses a files folder that is a symbolic link', async () => {
+            const topDir = await tempDir();
+            const trash = path.join(topDir, trashName);
+            await mkdir(trash, { mode: 0o700 });
+            const elsewhere = await tempDir();
+            await symlink(elsewhere, path.join(trash, 'files'));
+            const file = path.join(topDir, 'a.txt');
+            await writeFile(file, 'x');
+            await expect(moveToTopDirTrash(file, topDir)).rejects.toThrow('cannot be trusted');
+            expect((await lstat(file)).isFile()).toBe(true);
+            expect(await readdir(elsewhere)).toEqual([]);
+        });
     });
 
     it('names conflict copies', () => {

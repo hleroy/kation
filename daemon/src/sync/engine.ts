@@ -17,7 +17,7 @@
  * file watcher plus periodic local scans, which cost nothing remotely.
  */
 import { type FSWatcher, watch } from 'node:fs';
-import { mkdir, rename, rmdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, rename, rmdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { type DriveEvent, DriveEventType, type Logger, type NodeEntity } from '@protontech/drive-sdk';
@@ -179,6 +179,8 @@ export class SyncEngine {
     private notFoundRetried = new Set<string>();
     /** An item was skipped in this pass for a link with its name (reason "links"). */
     private linkInTheWay = false;
+    /** The sync folder's real path, resolved once per pass (see checkNoLinkAbove). */
+    private realRoot?: Promise<string>;
     /** Set when the user resumes after a deletion safety pause: the next pass may delete. */
     private allowMassDeletion = false;
     private pausedFor?: SafetyPause['kind'];
@@ -369,6 +371,7 @@ export class SyncEngine {
         this.freshFolders = new Set([...dirty].filter(([, fresh]) => fresh).map(([folder]) => folder));
         this.deletionsThisPass = 0;
         this.linkInTheWay = false;
+        this.realRoot = undefined;
         this.abort = new AbortController();
         const abort = this.abort;
         this.logger.info(
@@ -881,11 +884,13 @@ export class SyncEngine {
                 // base: unchanged ones follow the deletion, changed ones are downloaded.
                 await this.reconcileFolder(context, 'list', true, true, errors);
                 await this.checkRootBeforeWrite();
+                await this.checkNoLinkAbove(itemPath);
                 await mkdir(this.absolute(itemPath), { recursive: true });
                 return;
             }
             // New remote folder.
             await this.checkRootBeforeWrite();
+            await this.checkNoLinkAbove(itemPath);
             await mkdir(this.absolute(itemPath), { recursive: true });
             this.recordFolder(itemPath, remote.uid);
             await this.reconcileFolder(this.nodeContext(itemPath, remote.node ?? remote.uid), 'list', true, true, errors);
@@ -987,6 +992,7 @@ export class SyncEngine {
             if (await statItem(this.absolute(candidate))) {
                 continue;
             }
+            await this.checkNoLinkAbove(itemPath);
             await rename(this.absolute(itemPath), this.absolute(candidate));
             const item = await statItem(this.absolute(candidate));
             if (!item) {
@@ -1033,12 +1039,14 @@ export class SyncEngine {
         this.setStatus({ current: itemPath });
         const node = remote.node ?? (await this.options.sdk.getNode(remote.uid));
         await this.checkRootBeforeWrite();
+        await this.checkNoLinkAbove(itemPath);
         await mkdir(this.absolute(parentOf(itemPath)), { recursive: true });
         // A local edit saved while the download ran must not be overwritten: the next pass sees both changes.
         const beforeReplace = async () => {
             if (!sameLocalState(await statItem(this.absolute(itemPath)), expected)) {
                 throw new LocalChangedDuringDownload();
             }
+            await this.checkNoLinkAbove(itemPath);
         };
         try {
             await this.options.drive.downloadNode(node, this.absolute(itemPath), {
@@ -1072,6 +1080,7 @@ export class SyncEngine {
     private async trashLocal(itemPath: string): Promise<void> {
         this.countDeletion();
         this.logger.info(`Moving ${itemPath} to the desktop trash (deleted in Proton Drive)`);
+        await this.checkNoLinkAbove(itemPath);
         await this.options.trash(this.absolute(itemPath));
         this.itemDone(itemPath, 'trashedLocal');
     }
@@ -1268,6 +1277,33 @@ export class SyncEngine {
             }
         }
         return false;
+    }
+
+    /**
+     * Just before a local write: whether a folder above `itemPath` became a link since
+     * the pass checked it. Compares the whole path at once; a swap between this check
+     * and the write is still possible (no openat-style calls in Bun).
+     */
+    private async checkNoLinkAbove(itemPath: string): Promise<void> {
+        // The sync folder itself may be a link (see rootLooksValid).
+        this.realRoot ??= realpath(this.options.root);
+        const realRoot = await this.realRoot;
+        // A folder that does not exist yet is created by the write: check the deepest existing one.
+        let folder = parentOf(itemPath);
+        while (true) {
+            try {
+                const real = await realpath(this.absolute(folder));
+                if (real !== (folder === '/' ? realRoot : path.join(realRoot, folder))) {
+                    throw new LinkInTheWay(`A symbolic link in the sync folder leads ${folder} elsewhere`);
+                }
+                return;
+            } catch (error: unknown) {
+                if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || folder === '/') {
+                    throw error;
+                }
+                folder = parentOf(folder);
+            }
+        }
     }
 
     /**

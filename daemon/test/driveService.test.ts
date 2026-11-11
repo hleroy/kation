@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { describe, expect, it } from 'bun:test';
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { link, lstat, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { NodeType } from '@protontech/drive-sdk';
 
-import { mediaTypeOf } from '../src/service/driveService';
+import { mediaTypeOf, resumablePartPath } from '../src/service/driveService';
 import { setup, tempDir } from './helpers';
 
 describe('DriveService', () => {
@@ -238,6 +238,45 @@ describe('resumable downloads', () => {
         expect(await readdir(dir)).toEqual(['f.bin']);
     });
 
+    it('downloads again in full when the resumed file does not have the expected size', async () => {
+        const { fake, drive } = setup({ chunkDelayMs: 15 });
+        const content = 'abcdefghij'.repeat(100_000);
+        const file = fake.add({ parentUid: fake.rootUid, name: 'big.bin', type: NodeType.File, content });
+        const dir = await tempDir();
+        const local = path.join(dir, 'big.bin');
+        const abort = new AbortController();
+        setTimeout(() => abort.abort(), 100);
+        await expect(
+            drive.downloadNode(await fake.sdk.getNode(file.uid), local, { signal: abort.signal, resumable: true }),
+        ).rejects.toMatchObject({ code: 'Cancelled' });
+        await Bun.sleep(50);
+
+        // Same checksum, different size in the file's attributes.
+        const node = await fake.sdk.getNode(file.uid);
+        const revision = { ...node.activeRevision!, claimedSize: content.length + 1 };
+        fake.bytesServed = 0;
+        await drive.downloadNode({ ...node, activeRevision: revision }, local, { resumable: true });
+        expect(await readFile(local, 'utf8')).toBe(content);
+        expect(fake.bytesServed).toBeGreaterThan(content.length);
+        expect(await readdir(dir)).toEqual(['big.bin']);
+    });
+
+    it('does not resume without a size to check the result against', async () => {
+        const { fake, drive } = setup();
+        const file = fake.add({ parentUid: fake.rootUid, name: 'f.bin', type: NodeType.File, content: 'x'.repeat(1000) });
+        const node = await fake.sdk.getNode(file.uid);
+        const dir = await tempDir();
+        const local = path.join(dir, 'f.bin');
+        await writeFile(resumablePartPath(local, node.activeRevision!.uid), 'x'.repeat(10));
+
+        fake.bytesServed = 0;
+        await drive.downloadNode({ ...node, activeRevision: { ...node.activeRevision!, claimedSize: undefined } }, local, {
+            resumable: true,
+        });
+        expect(fake.bytesServed).toBe(1000);
+        expect(await readFile(local, 'utf8')).toBe('x'.repeat(1000));
+    });
+
     it('does not resume a partial file of an older version', async () => {
         const { fake, drive } = setup();
         const file = fake.add({ parentUid: fake.rootUid, name: 'f.txt', type: NodeType.File, content: 'version one' });
@@ -263,5 +302,77 @@ describe('resumable downloads', () => {
         ).rejects.toBeDefined();
         await Bun.sleep(50);
         expect(await readdir(dir)).toEqual([]);
+    });
+});
+
+describe('partial files', () => {
+    async function withVictim() {
+        const dir = await tempDir();
+        const victimDir = await tempDir();
+        const victim = path.join(victimDir, 'victim.txt');
+        await writeFile(victim, 'keep me');
+        return { dir, victimDir, victim };
+    }
+
+    it('does not write through a symbolic link at the partial file name', async () => {
+        const { fake, drive } = setup();
+        fake.add({ parentUid: fake.rootUid, name: 'a.txt', type: NodeType.File, content: 'from proton' });
+        const { dir, victim } = await withVictim();
+        const local = path.join(dir, 'a.txt');
+        await symlink(victim, `${local}.kation-part`);
+
+        await drive.download('/a.txt', local);
+        expect(await readFile(victim, 'utf8')).toBe('keep me');
+        expect(await readFile(local, 'utf8')).toBe('from proton');
+        expect((await lstat(local)).isFile()).toBe(true);
+        expect((await stat(local)).mode & 0o777).toBe(0o666 & ~process.umask());
+        expect(await readdir(dir)).toEqual(['a.txt']);
+    });
+
+    it('does not write through a symbolic link at the resumable partial file name', async () => {
+        const { fake, drive } = setup();
+        const file = fake.add({ parentUid: fake.rootUid, name: 'a.txt', type: NodeType.File, content: 'from proton' });
+        const node = await fake.sdk.getNode(file.uid);
+        const { dir, victim } = await withVictim();
+        const local = path.join(dir, 'a.txt');
+        await symlink(victim, resumablePartPath(local, node.activeRevision!.uid));
+
+        await drive.downloadNode(node, local, { resumable: true });
+        expect(await readFile(victim, 'utf8')).toBe('keep me');
+        expect(await readFile(local, 'utf8')).toBe('from proton');
+        expect(await readdir(dir)).toEqual(['a.txt']);
+    });
+
+    it('does not resume into a hard link', async () => {
+        const { fake, drive } = setup();
+        const content = 'from proton, a longer text';
+        const file = fake.add({ parentUid: fake.rootUid, name: 'a.txt', type: NodeType.File, content });
+        const node = await fake.sdk.getNode(file.uid);
+        const { dir, victim } = await withVictim();
+        const local = path.join(dir, 'a.txt');
+        await link(victim, resumablePartPath(local, node.activeRevision!.uid));
+
+        await drive.downloadNode(node, local, { resumable: true });
+        expect(await readFile(victim, 'utf8')).toBe('keep me');
+        expect(await readFile(local, 'utf8')).toBe(content);
+        expect(await readdir(dir)).toEqual(['a.txt']);
+    });
+
+    it('does not create the target of a dangling link at either partial file name', async () => {
+        const { fake, drive } = setup();
+        const file = fake.add({ parentUid: fake.rootUid, name: 'a.txt', type: NodeType.File, content: 'from proton' });
+        const node = await fake.sdk.getNode(file.uid);
+        const { dir, victimDir } = await withVictim();
+        const local = path.join(dir, 'a.txt');
+        const plainTarget = path.join(victimDir, 'plain');
+        const resumableTarget = path.join(victimDir, 'resumable');
+        await symlink(plainTarget, `${local}.kation-part`);
+        await symlink(resumableTarget, resumablePartPath(local, node.activeRevision!.uid));
+
+        await drive.downloadNode(node, local, { resumable: true });
+        await drive.download('/a.txt', local);
+        expect(await readFile(local, 'utf8')).toBe('from proton');
+        expect((await readdir(victimDir)).sort()).toEqual(['victim.txt']);
+        expect(await readdir(dir)).toEqual(['a.txt']);
     });
 });
