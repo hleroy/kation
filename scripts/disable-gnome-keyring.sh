@@ -11,6 +11,8 @@
 #   ./disable-gnome-keyring.sh --force    disable even if KWallet is not installed
 #                                         (e.g. you use KeePassXC as Secret Service)
 #
+# Exit status 3: a PAM file needs a change by hand (the script says which).
+#
 # Run as your normal user; sudo (or doas) is only used for PAM files.
 # Safe to run more than once. Works with or without systemd.
 #
@@ -55,7 +57,7 @@ for arg in "$@"; do
     case "$arg" in
         --undo)  MODE=undo ;;
         --force) FORCE=1 ;;
-        -h|--help) sed -n '5,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '5,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $arg (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -109,40 +111,96 @@ pam_files() {
     done
 }
 
-# Prints "<keyring line> <jump line>" for each active keyring line that a jump
-# passes over or lands on. A "[...=N]" control skips the next N module lines of
-# its type; comments and @include lines are not counted, include/substack are.
+# Prints "<keyring line> <jump line> <ours> <actions>" for each keyring line a
+# jump skips: a "[...=N]" control skips the next N module lines of its type.
+# Comments and @include lines are not modules; include/substack lines are.
+# Lines this script commented out count as before (ours=1): their jump counted them.
 pam_jumps() {
-    awk -v keyring="^$PAM_LINE" '
-    {
-        line = $0
+    KEYRING="^$PAM_LINE" MARK="$MARK" awk '
+    function check(line, start,    ours, type, rest, control, item, kv, pos, j, i, n, reach) {
+        ours = 0
+        if (index(line, ENVIRON["MARK"]) == 1) {
+            line = substr(line, length(ENVIRON["MARK"]) + 1)
+            ours = 1
+        } else if (line ~ /^#-/ && tolower(substr(line, 2)) ~ ENVIRON["KEYRING"]) {
+            line = substr(line, 2)
+            ours = 1
+        }
         sub(/^[[:space:]]+/, "", line)
-        if (line == "" || line ~ /^#/ || line ~ /^@/) next
-        type = line
+        if (line == "" || line ~ /^#/ || line ~ /^@/) return
+        type = tolower(line)
         sub(/[[:space:]].*/, "", type)
         sub(/^-/, "", type)
         pos = ++count[type]
-        at[type, pos] = NR
+        at[type, pos] = start
         rest = line
         sub(/^[^[:space:]]+[[:space:]]+/, "", rest)
         if (rest ~ /^\[/) {
             control = rest
             sub(/\].*/, "", control)
-            while (match(control, /=[0-9]+/)) {
-                n = substr(control, RSTART + 1, RLENGTH - 1) + 0
-                if (n > jump[type, pos]) jump[type, pos] = n
+            sub(/^\[/, "", control)
+            # libpam allows spaces around "=".
+            while (match(control, /[^[:space:]=]+[[:space:]]*=[[:space:]]*[0-9]+/)) {
+                item = substr(control, RSTART, RLENGTH)
+                gsub(/[[:space:]]/, "", item)
+                split(item, kv, "=")
+                if (kv[2] + 0 > 0) {
+                    names[type, pos, ++actions[type, pos]] = kv[1]
+                    values[type, pos, actions[type, pos]] = kv[2] + 0
+                }
                 control = substr(control, RSTART + RLENGTH)
             }
         }
-        if ((type == "auth" || type == "session") && line ~ keyring) {
+        if ((type == "auth" || type == "session") && tolower(line) ~ ENVIRON["KEYRING"]) {
             for (j = 1; j < pos; j++) {
-                if (jump[type, j] >= pos - j) {
-                    print NR, at[type, j]
-                    break
+                reach = ""
+                for (i = 1; i <= actions[type, j]; i++) {
+                    if (values[type, j, i] >= pos - j) {
+                        reach = reach (reach == "" ? "" : ",") names[type, j, i] "=" values[type, j, i]
+                    }
                 }
+                if (reach != "") print start, at[type, j], ours, reach
             }
         }
+    }
+    {
+        sub(/\r$/, "")
+        if (buffer == "") {
+            buffer = $0
+            first = NR
+        } else {
+            buffer = buffer " " $0
+        }
+        # A line ending in "\" continues on the next one (not in a comment, which ends it).
+        if (buffer !~ /^[[:space:]]*#/ && buffer ~ /\\$/) {
+            sub(/\\$/, "", buffer)
+            next
+        }
+        check(buffer, first)
+        buffer = ""
+    }
+    END {
+        if (buffer != "") check(buffer, first)
     }' "$1"
+}
+
+# Explains what pam_jumps found in a file, which is then left as it is.
+report_jumps() {
+    local f=$1 keyring_line jump_line ours reach
+    while read -r keyring_line jump_line ours reach; do
+        if [[ $ours == 1 ]]; then
+            info "WARNING: $f, line $keyring_line (pam_gnome_keyring) was commented out by an earlier"
+            info "  version of this script, but the jump on line $jump_line counted it, so that jump now"
+            info "  lands one module further. Run this script with --undo, then again."
+        else
+            info "LEFT UNCHANGED: $f, line $keyring_line (pam_gnome_keyring) is skipped by the jump on line $jump_line."
+            info "  To disable it by hand: comment out line $keyring_line, lower ${reach//,/ and } in line $jump_line"
+            info "  by one (write \"ignore\" for a value that becomes 0), then run this script again."
+        fi
+    done <<<"$2"
+    if [[ "${f%/*}" != "$PAM_DIR" ]]; then
+        info "  $f is a vendor file: copy it to $PAM_DIR first, as updates replace it."
+    fi
 }
 
 # ---------------------------------------------------------------- disable ---
@@ -199,20 +257,17 @@ disable_dbus() {
 disable_pam() {
     say "4/4 PAM ($PAM_DIR)"
     local f target changed=0
-    local jumps keyring_line jump_line
+    local jumps
     while IFS= read -r f; do
-        grep -Eq "$PAM_ACTIVE" "$f" || continue
+        grep -Eq "$PAM_ACTIVE|$PAM_OURS|$PAM_LEGACY" "$f" || continue
         jumps=$(pam_jumps "$f")
         if [[ -n "$jumps" ]]; then
             # Commenting out such a line would make the jump land one module further.
-            while read -r keyring_line jump_line; do
-                info "LEFT UNCHANGED: $f, line $keyring_line (pam_gnome_keyring) is within the jump on line $jump_line."
-                info "  To disable it by hand: comment out line $keyring_line, lower the number in line $jump_line by one,"
-                info "  then run this script again for the rest of the file."
-            done <<<"$jumps"
+            report_jumps "$f" "$jumps"
             SKIPPED+=("$f")
             continue
         fi
+        grep -Eq "$PAM_ACTIVE" "$f" || continue
         target="$PAM_DIR/${f##*/}"
         if [[ "$f" != "$target" ]]; then
             # Vendor file (e.g. openSUSE /usr/lib/pam.d): override it in /etc.
@@ -298,6 +353,6 @@ say "    busctl --user status org.freedesktop.secrets 2>/dev/null | grep -E '^(C
 
 if [[ ${#SKIPPED[@]} -gt 0 ]]; then
     say ""
-    say "WARNING: pam_gnome_keyring is still enabled in ${SKIPPED[*]} (see LEFT UNCHANGED above)."
+    say "WARNING: these PAM files need a change by hand (see above): ${SKIPPED[*]}"
     exit 3
 fi

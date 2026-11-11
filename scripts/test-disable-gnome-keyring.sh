@@ -39,6 +39,8 @@ fixture() {
 }
 
 disabled() { grep -q "^#gnome-keyring-disabled# $2" "$1"; }
+# Not cmp: diffutils is not in every base image.
+same() { [[ $(sha256sum <"$1") == $(sha256sum <"$2") ]]; }
 
 # 1. A stock Debian-style file: both lines are commented out, and --undo restores it.
 dir=$(fixture debian login '# The PAM configuration file for login
@@ -55,7 +57,7 @@ disabled "$dir/pam.d/login" 'session    optional   pam_gnome_keyring.so' || fail
 [[ $OUTPUT == *"disabled pam_gnome_keyring in $dir/pam.d/login"* ]] || fail "debian: message changed: $OUTPUT"
 run "$dir" --undo
 [[ $STATUS -eq 0 ]] || fail "debian undo: exit status $STATUS"
-cmp -s "$dir/pam.d/login" "$dir/original-login" || fail "debian undo: not restored byte for byte"
+same "$dir/pam.d/login" "$dir/original-login" || fail "debian undo: not restored byte for byte"
 
 # 2. A jump over the keyring line: the file is left alone, with a warning and a non-zero status.
 jump='auth [success=1 default=ignore] pam_unix.so nullok
@@ -66,9 +68,10 @@ auth required pam_permit.so
 dir=$(fixture jump common-auth "$jump")
 run "$dir"
 [[ $STATUS -ne 0 ]] || fail "jump: exit status 0"
-cmp -s "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "jump: file changed"
+same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "jump: file changed"
 [[ ! -e "$dir/pam.d/common-auth.bak" ]] || fail "jump: backup made of a file left alone"
-[[ $OUTPUT == *"$dir/pam.d/common-auth"*"line 2"*"line 1"* ]] || fail "jump: no warning naming the file and lines: $OUTPUT"
+[[ $OUTPUT == *"$dir/pam.d/common-auth, line 2"*"jump on line 1"*"success=1"* ]] || fail "jump: no warning naming the file and lines: $OUTPUT"
+[[ $OUTPUT != *"awk:"* ]] || fail "jump: awk printed a warning: $OUTPUT"
 
 # 3. The same jump, with the keyring line of another type: commented out.
 dir=$(fixture other-type common-auth 'auth [success=1 default=ignore] pam_unix.so nullok
@@ -94,8 +97,57 @@ dir=$(fixture mixed common-auth "$jump")
 printf 'auth optional pam_gnome_keyring.so\n' >"$dir/pam.d/login"
 run "$dir"
 [[ $STATUS -ne 0 ]] || fail "mixed: exit status 0"
-cmp -s "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "mixed: file with the jump changed"
+same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "mixed: file with the jump changed"
 disabled "$dir/pam.d/login" 'auth optional pam_gnome_keyring.so' || fail "mixed: the other file was not handled"
+
+# 6. Two jumps over the keyring line (an SSSD-style stack): both are reported.
+dir=$(fixture two-jumps common-auth 'auth [success=3 default=ignore] pam_unix.so nullok
+auth [success=2 default=ignore] pam_sss.so use_first_pass
+auth optional pam_gnome_keyring.so
+auth requisite pam_deny.so
+auth required pam_permit.so
+')
+run "$dir"
+[[ $STATUS -ne 0 ]] || fail "two jumps: exit status 0"
+same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "two jumps: file changed"
+[[ $OUTPUT == *"jump on line 1"*"jump on line 2"* ]] || fail "two jumps: both jumps not reported: $OUTPUT"
+
+# 7. Forms libpam accepts in the jump: "-", upper case, spaces around "=", a continued line.
+dir=$(fixture syntax common-auth '-AUTH [default = ignore \
+    success = 1] pam_unix.so nullok
+auth optional /usr/lib/security/pam_gnome_keyring.so debug
+auth requisite pam_deny.so
+')
+run "$dir"
+[[ $STATUS -ne 0 ]] || fail "syntax: exit status 0: $OUTPUT"
+same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "syntax: file changed"
+
+# 8. A keyring line with a control in brackets is never commented out: no jump of its own is lost.
+dir=$(fixture own-jump common-auth 'auth [success=1 default=ignore] pam_gnome_keyring.so
+auth requisite pam_deny.so
+auth required pam_permit.so
+')
+run "$dir"
+same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "own jump: file changed"
+
+# 9. A keyring line an earlier version commented out inside a jump: a warning pointing to --undo.
+dir=$(fixture earlier common-auth 'auth [success=2 default=ignore] pam_unix.so nullok
+#gnome-keyring-disabled# auth optional pam_gnome_keyring.so
+auth requisite pam_deny.so
+auth required pam_permit.so
+')
+run "$dir"
+[[ $STATUS -ne 0 ]] || fail "earlier: exit status 0"
+[[ $OUTPUT == *"earlier"*"--undo"* ]] || fail "earlier: no warning: $OUTPUT"
+
+# 10. A vendor file with a jump: no copy is made in PAM_DIR.
+dir=$(fixture vendor unused '')
+mkdir -p "$dir/vendor"
+printf '%s' "$jump" >"$dir/vendor/common-auth"
+run "$dir"
+[[ $STATUS -ne 0 ]] || fail "vendor: exit status 0"
+[[ ! -e "$dir/pam.d/common-auth" ]] || fail "vendor: copied to PAM_DIR"
+[[ $OUTPUT == *"vendor file"* ]] || fail "vendor: no note about vendor files: $OUTPUT"
 
 if [[ $FAILURES -gt 0 ]]; then
     echo "$FAILURES check(s) failed" >&2
