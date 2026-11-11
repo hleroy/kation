@@ -16,10 +16,11 @@ import { NodeType } from '@protontech/drive-sdk';
 
 import { getVersions, THIRD_PARTY_NOTICE } from './appInfo';
 import { openBrowserUrl } from './browser';
-import { connectService, entryToRow, type Row, type ServiceClient, unwrap } from './client';
+import { connectService, entryToRow, formatRows, type Row, type ServiceClient, unwrap } from './client';
 import { getConfig } from './config';
 import { type Drive, openDrive } from './drive';
 import { listFolder, nodeName, resolvePath } from './drivePaths';
+import { printable } from './printable';
 import { serve } from './service/serve';
 import { forgetSyncedFiles } from './sync/controller';
 import { SettingsStore } from './sync/settings';
@@ -125,6 +126,12 @@ const ACTIVITY_LABELS: Record<string, string> = {
     trashedLocal: 'Moved to the desktop Trash',
     conflict: 'Conflict, kept both',
     error: 'Could not sync',
+    skipped: 'Not synced',
+};
+
+/** Activity detail codes (see GetRecentActivity in the interface XML). */
+const ACTIVITY_DETAILS: Record<string, string> = {
+    nameTooLong: 'its name or path is too long for this computer',
 };
 
 /** A path in "My files", a local path or a URL, as the URL the service expects. */
@@ -147,19 +154,18 @@ function printSignInInstructions(json: boolean, signInUrl: string): void {
         console.log(THIRD_PARTY_NOTICE);
         console.log('Sign in with your browser. Keep this terminal open until it completes.');
         console.log('If no browser opened, open this URL (it can be on another device):');
-        console.log(signInUrl);
+        console.log(printable(signInUrl));
     }
 }
 
 function printRows(rows: Row[], json: boolean): void {
-    rows.sort((a, b) => Number(b.type === 'folder') - Number(a.type === 'folder') || a.name.localeCompare(b.name));
     if (json) {
+        rows.sort((a, b) => Number(b.type === 'folder') - Number(a.type === 'folder') || a.name.localeCompare(b.name));
         console.log(JSON.stringify(rows));
         return;
     }
-    for (const row of rows) {
-        const size = row.type === 'folder' ? '-' : String(row.size ?? '?');
-        console.log(`${row.modified.slice(0, 16).replace('T', ' ')}  ${size.padStart(12)}  ${row.name}${row.type === 'folder' ? '/' : ''}`);
+    for (const line of formatRows(rows)) {
+        console.log(line);
     }
 }
 
@@ -175,26 +181,31 @@ async function runThroughService(service: ServiceClient, command: string, args: 
             const activity = ((await service.call('GetRecentActivity')) as unknown[]).map(unwrap);
             const lines = activity.map((item) => {
                 const time = new Date(Number(item.time) * 1000).toLocaleString();
-                const detail = item.detail ? ` (${item.detail})` : '';
-                return `${time}  ${ACTIVITY_LABELS[String(item.kind)] ?? item.kind}: ${item.path}${detail}`;
+                const detailText = item.kind === 'skipped' ? (ACTIVITY_DETAILS[String(item.detail)] ?? item.detail) : item.detail;
+                const detail = detailText ? ` (${printable(String(detailText))})` : '';
+                return `${time}  ${ACTIVITY_LABELS[String(item.kind)] ?? printable(String(item.kind))}: ${printable(String(item.path))}${detail}`;
             });
             print(json, activity, lines.length > 0 ? lines.join('\n') : 'No sync activity since the service started.');
             return;
         }
         case 'link': {
             const link = String(await service.call('GetShareLink', itemArg(), create));
-            print(json, { link }, link || 'No public link. Run again with --create to make one (anyone with the link can view it).');
+            print(
+                json,
+                { link },
+                printable(link) || 'No public link. Run again with --create to make one (anyone with the link can view it).',
+            );
             return;
         }
         case 'weburl': {
             const webUrl = String(await service.call('GetWebUrl', itemArg()));
-            print(json, { webUrl }, webUrl);
+            print(json, { webUrl }, printable(webUrl));
             return;
         }
         case 'status': {
             const status = unwrap(await service.call('GetStatus'));
-            const text = status.loggedIn ? `Signed in as ${status.email}` : 'Not signed in.';
-            print(json, status, status.problem ? `${text}\n${status.problem}` : text);
+            const text = status.loggedIn ? `Signed in as ${printable(String(status.email))}` : 'Not signed in.';
+            print(json, status, status.problem ? `${text}\n${printable(String(status.problem))}` : text);
             return;
         }
         case 'login': {
@@ -238,7 +249,7 @@ async function runThroughService(service: ServiceClient, command: string, args: 
             const currentExcluded = async () => (unwrap(await service.call('GetSyncStatus')).excluded as string[]) ?? [];
             if (action === 'excluded') {
                 const excluded = await currentExcluded();
-                print(json, excluded, excluded.length > 0 ? excluded.join('\n') : 'No folders are excluded.');
+                print(json, excluded, excluded.length > 0 ? excluded.map(printable).join('\n') : 'No folders are excluded.');
                 return;
             }
             const actions: Record<string, () => Promise<unknown>> = {
@@ -288,11 +299,11 @@ async function runThroughService(service: ServiceClient, command: string, args: 
             }
             await run();
             const status = unwrap(await service.call('GetSyncStatus'));
-            const detail = status.message && status.message !== 'Paused' ? ` (${status.message})` : '';
+            const detail = status.message && status.message !== 'Paused' ? ` (${printable(String(status.message))})` : '';
             const limit = (value: unknown) => (Number(value) > 0 ? `${value} KiB/s` : 'no limit');
             const limits =
                 action === 'limits' ? `\nSpeed limits: upload ${limit(status.uploadLimit)}, download ${limit(status.downloadLimit)}` : '';
-            print(json, status, `Sync ${status.enabled ? status.state : 'off'}${detail}: ${status.folder}${limits}`);
+            print(json, status, `Sync ${status.enabled ? status.state : 'off'}${detail}: ${printable(String(status.folder))}${limits}`);
             return;
         }
     }
@@ -333,7 +344,7 @@ const LOCAL_COMMANDS: Record<string, Handler> = {
             return;
         }
         const address = await drive.addresses.getOwnPrimaryAddress();
-        print(json, { loggedIn: true, email: address.email }, `Signed in as ${address.email}`);
+        print(json, { loggedIn: true, email: address.email }, `Signed in as ${printable(address.email)}`);
     },
 
     async ls(drive, args, json) {
@@ -371,7 +382,7 @@ try {
     process.exit(await main(process.argv.slice(2)));
 } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`kationd: ${message}`);
+    console.error(`kationd: ${printable(message)}`);
     if (error instanceof UsageError) {
         console.error('Run "kationd --help" for usage.');
         process.exit(2);

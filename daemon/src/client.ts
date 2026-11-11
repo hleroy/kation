@@ -9,6 +9,7 @@
  */
 import dbus from 'dbus-next';
 
+import { printable } from './printable';
 import { BUS_NAME, INTERFACE_NAME, interfaceXml, OBJECT_PATH } from './service/dbusServer';
 
 export type Row = { name: string; type: string; size: number | null; modified: string };
@@ -69,6 +70,17 @@ export function unwrap(map: unknown): Record<string, unknown> {
         result[key] = typeof value === 'bigint' ? Number(value) : value;
     }
     return result;
+}
+
+/** `ls` output for people: folders first, then by name. */
+export function formatRows(rows: Row[]): string[] {
+    return [...rows]
+        .sort((a, b) => Number(b.type === 'folder') - Number(a.type === 'folder') || a.name.localeCompare(b.name))
+        .map((row) => {
+            const size = row.type === 'folder' ? '-' : String(row.size ?? '?');
+            const name = `${printable(row.name)}${row.type === 'folder' ? '/' : ''}`;
+            return `${row.modified.slice(0, 16).replace('T', ' ')}  ${size.padStart(12)}  ${name}`;
+        });
 }
 
 export function entryToRow(entry: Record<string, unknown>): Row {

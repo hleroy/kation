@@ -50,6 +50,9 @@ QString activityText(const QVariantMap &activity)
     if (kind == QLatin1String("conflict")) {
         return i18nc("recent activity", "Kept both versions of %1", name);
     }
+    if (kind == QLatin1String("skipped")) {
+        return i18nc("recent activity", "Not synced, its name or path is too long: %1", name);
+    }
     return i18nc("recent activity", "Could not sync %1", name);
 }
 
@@ -66,6 +69,9 @@ QString activityIcon(const QString &kind)
     }
     if (kind == QLatin1String("conflict")) {
         return QStringLiteral("document-duplicate");
+    }
+    if (kind == QLatin1String("skipped")) {
+        return QStringLiteral("dialog-warning");
     }
     return QStringLiteral("dialog-error");
 }
@@ -392,7 +398,8 @@ void KationTray::updateActivityMenu()
             }
         });
         QString tip = activity.value(QStringLiteral("path")).toString() + QLatin1Char('\n') + QLocale().toString(time, QLocale::ShortFormat);
-        const QString detail = activity.value(QStringLiteral("detail")).toString();
+        // A skipped item's detail is a code, already worded by activityText().
+        const QString detail = kind == QLatin1String("skipped") ? QString() : activity.value(QStringLiteral("detail")).toString();
         if (!detail.isEmpty()) {
             tip += QLatin1Char('\n') + detail;
         }

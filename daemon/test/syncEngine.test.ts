@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { lstat, mkdir, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { NodeType } from '@protontech/drive-sdk';
+import { DriveEventType, NodeType } from '@protontech/drive-sdk';
 
 import { DriveService } from '../src/service/driveService';
 import { FakeDrive } from '../src/service/fakeDrive';
@@ -1028,6 +1028,127 @@ describe('SyncEngine', () => {
         expect(await readdir(moved)).toEqual(['a.txt']);
         expect(await ctx.trashed()).toEqual([]);
         expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'links' });
+    });
+
+    describe('over-long remote names', () => {
+        const longName = `${'n'.repeat(296)}.txt`;
+
+        it('skips a remote file whose name is too long, once, and stays up to date', async () => {
+            const activity: string[] = [];
+            const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`) });
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: longName, type: NodeType.File, content: 'long' });
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'normal.txt', type: NodeType.File, content: 'normal' });
+            await ctx.engine.start();
+            await ctx.settle();
+            ctx.fake.remoteChange({ type: DriveEventType.NodeUpdated, uid: ctx.fake.rootUid });
+            await ctx.settle();
+
+            expect(await readFile(ctx.local('normal.txt'), 'utf8')).toBe('normal');
+            expect(ctx.engine.getStatus().state).toBe('idle');
+            expect(activity.filter((line) => line.startsWith('skipped'))).toEqual([`skipped /${longName} nameTooLong`]);
+            expect((await readdir(ctx.root)).sort()).toEqual(['.kation-sync', 'normal.txt']);
+        });
+
+        it('skips a remote folder whose name is too long', async () => {
+            const activity: string[] = [];
+            const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`) });
+            const folder = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: longName, type: NodeType.Folder });
+            ctx.fake.add({ parentUid: folder.uid, name: 'inside.txt', type: NodeType.File, content: 'inside' });
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'normal.txt', type: NodeType.File, content: 'normal' });
+            await ctx.engine.start();
+            await ctx.settle();
+            ctx.fake.remoteChange({ type: DriveEventType.NodeUpdated, uid: ctx.fake.rootUid });
+            await ctx.settle();
+
+            expect(ctx.engine.getStatus().state).toBe('idle');
+            expect(activity.filter((line) => line.startsWith('skipped'))).toEqual([`skipped /${longName} nameTooLong`]);
+            expect((await readdir(ctx.root)).sort()).toEqual(['.kation-sync', 'normal.txt']);
+        });
+
+        it('leaves out, without reporting, a refused name that could not be a file name', async () => {
+            const activity: string[] = [];
+            const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`) });
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: `${'a'.repeat(300)}\0x`, type: NodeType.File, content: 'nul' });
+            ctx.fake.add({
+                parentUid: ctx.fake.rootUid,
+                name: `${'a'.repeat(300)}/../../etc/passwd`,
+                type: NodeType.File,
+                content: 'slash',
+            });
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'ok.txt', type: NodeType.File, content: 'ok' });
+            await ctx.engine.start();
+            await ctx.settle();
+
+            expect(await readFile(ctx.local('ok.txt'), 'utf8')).toBe('ok');
+            expect(ctx.engine.getStatus().state).toBe('idle');
+            expect(activity.filter((line) => !line.startsWith('downloaded'))).toEqual([]);
+        });
+
+        it('skips a name the SDK accepts but that is too long in bytes', async () => {
+            const activity: string[] = [];
+            const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`) });
+            const accented = `${'é'.repeat(200)}.txt`;
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: accented, type: NodeType.File, content: 'long' });
+            await ctx.engine.start();
+            await ctx.settle();
+
+            expect(ctx.engine.getStatus().state).toBe('idle');
+            expect(activity).toEqual([`skipped /${accented} nameTooLong`]);
+        });
+
+        it('keeps the local copy of a synced file renamed to a name too long to list', async () => {
+            const ctx = await setup();
+            const file = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'a.txt', type: NodeType.File, content: 'a' });
+            await ctx.engine.start();
+            await ctx.settle();
+            await ctx.fake.sdk.renameNode(file.uid, longName);
+            await untilError(ctx.engine);
+
+            expect(await readFile(ctx.local('a.txt'), 'utf8')).toBe('a');
+            expect(await ctx.trashed()).toEqual([]);
+        });
+
+        it('skips a remote folder whose path is too long for the file system', async () => {
+            const activity: string[] = [];
+            const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`) });
+            let parentUid = ctx.fake.rootUid;
+            for (let depth = 0; depth < 20; depth++) {
+                parentUid = ctx.fake.add({ parentUid, name: `${depth}`.padEnd(240, 'd'), type: NodeType.Folder }).uid;
+            }
+            await ctx.engine.start();
+            await ctx.settle();
+
+            expect(ctx.engine.getStatus().state).toBe('idle');
+            expect(activity.filter((line) => line.startsWith('skipped'))).toHaveLength(1);
+            expect(activity.filter((line) => line.startsWith('error'))).toEqual([]);
+        });
+
+        it('downloads names just under the limit, in ASCII and in multi-byte characters', async () => {
+            const ctx = await setup();
+            const ascii = `${'a'.repeat(246)}.txt`;
+            const accented = `${'é'.repeat(123)}.txt`;
+            expect([Buffer.byteLength(ascii), Buffer.byteLength(accented)]).toEqual([250, 250]);
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: ascii, type: NodeType.File, content: 'ascii' });
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: accented, type: NodeType.File, content: 'accented' });
+            await ctx.engine.start();
+            await ctx.settle();
+
+            expect(await readFile(ctx.local(ascii), 'utf8')).toBe('ascii');
+            expect(await readFile(ctx.local(accented), 'utf8')).toBe('accented');
+            expect(ctx.engine.getStatus().state).toBe('idle');
+        });
+
+        it('syncs the item once it is renamed to a shorter name', async () => {
+            const ctx = await setup();
+            const file = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: longName, type: NodeType.File, content: 'long' });
+            await ctx.engine.start();
+            await ctx.settle();
+            await ctx.fake.sdk.renameNode(file.uid, 'short.txt');
+            await ctx.settle();
+
+            expect(await readFile(ctx.local('short.txt'), 'utf8')).toBe('long');
+            expect(ctx.engine.getStatus().state).toBe('idle');
+        });
     });
 
     it('preserves modification times of downloads', async () => {

@@ -161,9 +161,12 @@
       started). Activity (a{sv}): time x (seconds since the epoch), kind s
       ("uploaded", "downloaded", "trashedRemote" (deleted locally, moved to
       the Proton trash), "trashedLocal" (deleted on Proton, moved to the
-      desktop Trash), "conflict" or "error"), path s (in "My files"),
-      localPath s, detail s (conflict: the copy kept, as a path in "My files";
-      error: the message, or "" when the sync status reason words it).
+      desktop Trash), "conflict", "error" or "skipped" (a remote item sync
+      leaves out, reported once), path s (in "My files"), localPath s,
+      detail s (conflict: the copy kept, as a path in "My files"; error: the
+      message, or "" when the sync status reason words it; skipped: why, as a
+      code: "nameTooLong", its name or path is too long for the local file
+      system).
     -->
     <method name="GetRecentActivity">
       <arg name="activity" type="aa{sv}" direction="out"/>
