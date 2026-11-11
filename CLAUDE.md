@@ -76,12 +76,13 @@ Add a line to `[Unreleased]` in `CHANGELOG.md` for every user-visible change. On
 line per entry: what changed, plus a short "why" only when it is not obvious. No
 paragraphs, no narrating the investigation.
 
-To release: bump `project(VERSION)` and `daemon/package.json`, rename `[Unreleased]`
-to `[x.y.z] - YYYY-MM-DD` with a compare link, merge that, then tag the merged commit
-on `main` `vx.y.z` and push the tag: the Release workflow checks the tag and version,
-builds the packages and publishes the GitHub release. To redo a release, delete it and
-its tag first (`gh release delete vx.y.z --cleanup-tag`): the workflow fails when the
-release already exists.
+To release: refresh the CI container digests in `ci.yml` and `packages.yml` (Dependabot
+does not; see DEVNOTES.md, "Releasing"), bump `project(VERSION)` and
+`daemon/package.json`, rename `[Unreleased]` to `[x.y.z] - YYYY-MM-DD` with a compare
+link, merge that, then tag the merged commit on `main` `vx.y.z` and push the tag: the
+Release workflow checks the tag and version, builds the packages and publishes the
+GitHub release. To redo a release, delete it and its tag first (`gh release delete
+vx.y.z --cleanup-tag`): the workflow fails when the release already exists.
 
 ## Code comments
 
