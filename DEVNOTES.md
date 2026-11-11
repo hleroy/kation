@@ -195,6 +195,12 @@ Proton **test** account (`bun e2e/realAccount.ts --expect-email …`).
 
 The Release workflow checks that the tag is on `main` and matches the
 version and the changelog, builds the three packages and publishes a GitHub
-release with the changelog section as notes. To redo a release, delete it
+release with the changelog section as notes, `SHA256SUMS` and a build
+provenance attestation for each package. To redo a release, delete it
 and its tag first (`gh release delete vx.y.z --cleanup-tag`): the workflow
 fails when the release already exists.
+
+The CI containers (`debian:trixie`, `fedora:43`, `archlinux:latest` in
+`ci.yml` and `packages.yml`) are pinned by digest, which Dependabot does not
+update. Before a release, refresh them with the command in the comment next to
+each (`docker buildx imagetools inspect <image>`).

@@ -16,7 +16,8 @@
 #   release tag. Dependabot's gitsubmodule ecosystem follows the branch head, so
 #   it would propose untagged commits; bump the submodule by hand.
 # - The `file:` dependencies on that submodule, which Dependabot skips.
-# - The container images in ci.yml and packages.yml.
+# - The container images in ci.yml and packages.yml, pinned by digest: refresh
+#   them by hand (see DEVNOTES.md, "Releasing").
 
 version: 2
 updates:

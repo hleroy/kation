@@ -31,10 +31,10 @@
     },
     "overrides": {
         "@xmldom/xmldom": "^0.9.12",
-        "brace-expansion@1": "1.1.18",
-        "brace-expansion@2": "2.1.4",
-        "brace-expansion@5": "^5.0.9",
-        "tmp": "^0.2.7"
+        "brace-expansion@1": "1.1.21",
+        "brace-expansion@2": "2.1.7",
+        "tmp": "^0.2.7",
+        "xml2js": "^0.6.2"
     },
     "patchedDependencies": {
         "@protontech/crypto@2.0.0": "../third_party/proton-drive-sdk/config/js/patches/@protontech%2Fcrypto@2.0.0.patch"

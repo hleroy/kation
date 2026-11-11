@@ -39,7 +39,15 @@ The details are in [How folder sync works](docs/sync.md).
 
 Download the package for your distribution from the
 [latest release](https://github.com/hleroy/kation/releases/latest) and
-install it:
+install it. Releases after 0.2.0 come with `SHA256SUMS` and build
+provenance: check the package you downloaded first (the second command needs
+the GitHub CLI).
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify <package file> --repo hleroy/kation \
+    --signer-workflow hleroy/kation/.github/workflows/release.yml
+```
 
 ```sh
 sudo apt install ./kation_*_amd64.deb            # Debian 13
