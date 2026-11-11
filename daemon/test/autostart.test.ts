@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { describe, expect, it } from 'bun:test';
-import { mkdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { Autostart, XDG_AUTOSTART_NAME } from '../src/sync/autostart';
+import { Autostart, desktopExecArgument, runningProgram, XDG_AUTOSTART_NAME } from '../src/sync/autostart';
 import { silentLogger, tempDir } from './helpers';
 
 describe('Autostart', () => {
@@ -56,12 +56,46 @@ describe('Autostart', () => {
 
     it('uses an XDG autostart entry without systemd', async () => {
         const configHome = await tempDir();
-        const autostart = new Autostart({ configDir: path.join(configHome, 'kation'), runtimeDir: undefined, logger: silentLogger });
+        const autostart = new Autostart({
+            configDir: path.join(configHome, 'kation'),
+            runtimeDir: undefined,
+            logger: silentLogger,
+            program: '/usr/bin/kationd',
+        });
         expect(autostart.hasSystemd()).toBe(false);
         const entry = path.join(configHome, 'autostart', XDG_AUTOSTART_NAME);
         await autostart.set(true);
-        expect(await readFile(entry, 'utf8')).toContain('Exec=kationd serve');
+        expect(await readFile(entry, 'utf8')).toContain('\nExec=/usr/bin/kationd serve\n');
         await autostart.set(false);
         await expect(stat(entry)).rejects.toThrow();
+    });
+
+    it('rewrites an entry written by an older version, which relied on PATH', async () => {
+        const configHome = await tempDir();
+        const entry = path.join(configHome, 'autostart', XDG_AUTOSTART_NAME);
+        await mkdir(path.dirname(entry));
+        await writeFile(entry, '[Desktop Entry]\nType=Application\nExec=kationd serve\n');
+        const autostart = new Autostart({
+            configDir: path.join(configHome, 'kation'),
+            logger: silentLogger,
+            program: '/opt/My Apps/kationd',
+        });
+        await autostart.set(true);
+        const content = await readFile(entry, 'utf8');
+        expect(content).toContain('\nExec="/opt/My Apps/kationd" serve\n');
+        expect(content).not.toContain('Exec=kationd');
+    });
+
+    it('quotes program paths as the Desktop Entry specification requires', () => {
+        expect(desktopExecArgument('/usr/bin/kationd')).toBe('/usr/bin/kationd');
+        expect(desktopExecArgument('/opt/My Apps/kationd')).toBe('"/opt/My Apps/kationd"');
+        // Quoting escapes " ` $ \ with a backslash; the value's own escaping then doubles every backslash.
+        expect(desktopExecArgument('/opt/a$b"c`d\\e/kationd')).toBe('"/opt/a\\\\$b\\\\"c\\\\`d\\\\\\\\e/kationd"');
+        expect(desktopExecArgument('/opt/100%/kationd')).toBe('/opt/100%%/kationd');
+    });
+
+    it('names the running program only when it is the compiled kationd', () => {
+        // Under bun test, the running program is Bun itself.
+        expect(runningProgram()).toBe('kationd');
     });
 });

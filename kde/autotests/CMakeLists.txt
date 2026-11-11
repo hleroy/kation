@@ -44,6 +44,7 @@ set_tests_properties(kio-protondrive PROPERTIES
 add_executable(settingswidgettest settingswidgettest.cpp)
 target_link_libraries(settingswidgettest PRIVATE kation_settings Qt6::Test Qt6::Widgets KF6::KCMUtils KF6::CoreAddons)
 target_compile_definitions(settingswidgettest PRIVATE
+    KATION_TRAY_EXECUTABLE="${KDE_INSTALL_FULL_BINDIR}/kation"
     KATIOND_EXECUTABLE="${KATIOND_EXECUTABLE}"
     KATION_KCM_PLUGIN="$<TARGET_FILE:kcm_kation>"
 )
