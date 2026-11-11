@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 # C++ is for the KDE components (Qt 6 / KDE Frameworks 6).
-project(kation VERSION 0.2.0 LANGUAGES CXX)
+project(kation VERSION 0.3.0 LANGUAGES CXX)
 
 option(BUILD_KDE_COMPONENTS "Build the KDE components (needs Qt 6 and KDE Frameworks 6)" ON)
 
