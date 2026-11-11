@@ -1,10 +1,21 @@
 {
     "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Kation contributors",
+                "Name[fr]": "Les contributeurs de Kation"
+            }
+        ],
+        "BugReportUrl": "https://github.com/hleroy/kation/issues",
+        "Copyright": "© 2026 Kation contributors",
+        "Copyright[fr]": "© 2026 Les contributeurs de Kation",
         "Description": "Unofficial Proton Drive client: account, folder sync and speed limits",
         "Description[fr]": "Client Proton Drive non officiel : compte, synchronisation de dossier et limites de vitesse",
         "Icon": "com.hleroy.Kation",
+        "License": "GPL-2.0-or-later",
         "Name": "Proton Drive (Kation)",
-        "Name[fr]": "Proton Drive (Kation)"
+        "Name[fr]": "Proton Drive (Kation)",
+        "Website": "https://github.com/hleroy/kation"
     },
     "X-KDE-Keywords": "Proton,Drive,Kation,cloud,sync,storage",
     "X-KDE-Keywords[fr]": "Proton,Drive,Kation,cloud,nuage,synchronisation,stockage",

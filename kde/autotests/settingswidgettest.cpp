@@ -18,10 +18,12 @@
 #include <KPluginMetaData>
 
 #include <QCheckBox>
+#include <QClipboard>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QLabel>
 #include <QPushButton>
 #include <QSignalSpy>
@@ -57,6 +59,7 @@ private Q_SLOTS:
     void cleanupTestCase();
     void signsInAndOut();
     void foldersLimitsAndStartup();
+    void aboutTab();
     void systemSettingsMode();
     void loadsInSystemSettings();
     void quotesAutostartPrograms();
@@ -149,7 +152,8 @@ void SettingsWidgetTest::signsInAndOut()
     QVERIFY(QTest::qWaitForWindowExposed(m_window.get()));
 
     QTRY_COMPARE(state(), u"Not signed in"_s);
-    QVERIFY(m_window->findChild<QLabel *>(u"notice"_s)->isEnabled());
+    // Proton's guidelines: the notice wherever you sign in.
+    QVERIFY(m_window->findChild<QLabel *>(u"notice"_s)->isVisible());
     QVERIFY(button("signIn")->isVisible());
     QVERIFY(!button("signOut")->isVisible());
     screenshot(u"1-signed-out"_s);
@@ -163,6 +167,7 @@ void SettingsWidgetTest::signsInAndOut()
     screenshot(u"2-waiting"_s);
 
     QTRY_COMPARE_WITH_TIMEOUT(state(), u"Signed in"_s, 5000);
+    QVERIFY(m_window->findChild<QLabel *>(u"notice"_s)->isVisible());
     QVERIFY(m_window->findChild<QLabel *>(u"details"_s)->text().contains(u"tester@example.com"_s));
     QVERIFY(button("signOut")->isVisible());
     QVERIFY(button("openFiles")->isVisible());
@@ -297,6 +302,47 @@ void SettingsWidgetTest::foldersLimitsAndStartup()
     screenshot(u"6-network-startup"_s);
 }
 
+void SettingsWidgetTest::aboutTab()
+{
+    auto tabs = m_window->findChild<QTabWidget *>(u"tabs"_s);
+    QCOMPARE(tabs->tabText(3), u"About"_s);
+    tabs->setCurrentIndex(3);
+
+    KationDriveInterface drive(Kation::serviceName, Kation::objectPath, QDBusConnection::sessionBus());
+    QDBusPendingReply<QVariantMap> status = drive.GetStatus();
+    status.waitForFinished();
+    const QString serviceVersion = status.value().value(u"appVersion"_s).toString();
+    const QString sdkVersion = status.value().value(u"sdkVersion"_s).toString();
+    QVERIFY(!serviceVersion.isEmpty());
+    QVERIFY(!sdkVersion.isEmpty());
+    QCOMPARE(m_window->findChild<QLabel *>(u"appVersion"_s)->text(), u"Version " KATION_VERSION_STRING ""_s);
+    // Shown as "0.3.0 (fd6d8cb)", not as the identifier sent to Proton.
+    QVERIFY(serviceVersion.startsWith(u"external-drive-kation@" KATION_VERSION_STRING ""_s));
+    QVERIFY2(m_window->findChild<QLabel *>(u"serviceVersion"_s)->text().startsWith(u"" KATION_VERSION_STRING " ("_s),
+             qPrintable(m_window->findChild<QLabel *>(u"serviceVersion"_s)->text()));
+    QVERIFY(!m_window->findChild<QLabel *>(u"sdkVersion"_s)->text().contains(u'@'));
+    QVERIFY(m_window->findChild<QLabel *>(u"logFile"_s)->text().contains(u"/kation/kationd.log"_s));
+    QVERIFY2(m_window->findChild<QLabel *>(u"legal"_s)->text().contains(u">GPL-2.0-or-later</a>, <a href=\"https://spdx.org/licenses/MIT.html\">MIT</a>"_s),
+             qPrintable(m_window->findChild<QLabel *>(u"legal"_s)->text()));
+
+    QTest::mouseClick(button("copyVersionInfo"), Qt::LeftButton);
+    const QString info = QGuiApplication::clipboard()->text();
+    QVERIFY2(info.startsWith(u"Kation " KATION_VERSION_STRING "\nkationd "_s + serviceVersion + u"\nProton Drive SDK "_s + sdkVersion + u'\n'),
+             qPrintable(info));
+    QVERIFY(info.contains(u"KDE Frameworks "_s));
+
+    m_openedUrls.clear();
+    Q_EMIT m_window->findChild<QLabel *>(u"links"_s)->linkActivated(u"https://github.com/hleroy/kation/issues"_s);
+    QCOMPARE(m_openedUrls, QList<QUrl>{QUrl(u"https://github.com/hleroy/kation/issues"_s)});
+    QVERIFY(m_window->findChild<QLabel *>(u"links"_s)->text().contains(u"href=\"https://github.com/hleroy/kation/issues\""_s));
+    // The tab must fit the Kation window's default size (main.cpp); a larger minimum would grow the window.
+    m_window->resize(560, 440);
+    QVERIFY2(m_window->minimumSizeHint().height() <= 440, qPrintable(QString::number(m_window->minimumSizeHint().height())));
+    QCOMPARE(m_window->size(), QSize(560, 440));
+    QTRY_VERIFY2(nothingClipped(), "Text or buttons of the window are cut off");
+    screenshot(u"7-about"_s);
+}
+
 void SettingsWidgetTest::systemSettingsMode()
 {
     // In System Settings, changes wait for Apply.
@@ -327,6 +373,7 @@ void SettingsWidgetTest::loadsInSystemSettings()
     const KPluginMetaData metaData(QStringLiteral(KATION_KCM_PLUGIN));
     QVERIFY(metaData.isValid());
     QCOMPARE(metaData.value(u"X-KDE-System-Settings-Parent-Category"_s), u"network"_s);
+    QCOMPARE(metaData.license(), u"GPL-2.0-or-later"_s);
     QWidget parent;
     KCModule *module = KCModuleLoader::loadModule(metaData, &parent);
     QVERIFY(module);

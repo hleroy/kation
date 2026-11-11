@@ -21,8 +21,9 @@ class QTreeWidget;
 class QTreeWidgetItem;
 
 /**
- * Kation settings: account, folder sync, folders to sync, speed limits and
- * startup. Used by the System Settings module and by the Kation window.
+ * Kation settings: account, folder sync, folders to sync, speed limits,
+ * startup, and information about Kation. Used by the System Settings module
+ * and by the Kation window.
  *
  * Signing in and out, and turning sync on, off or pausing it, act at once.
  * The other settings follow the System Settings model: changed() when they
@@ -53,6 +54,9 @@ private:
     void buildGeneralTab(QWidget *tab);
     void buildFoldersTab(QWidget *tab);
     void buildAdvancedTab(QWidget *tab);
+    void buildAboutTab(QWidget *page);
+    /// Versions and system details for bug reports, in English.
+    QString versionInfo() const;
     /// Grows the window so wrapped text and buttons are never cut off.
     void fitToContents();
 
@@ -115,6 +119,12 @@ private:
     QCheckBox *m_limitDownload;
     QSpinBox *m_downloadLimit;
     QCheckBox *m_trayAtLogin;
+
+    QLabel *m_serviceVersion;
+    QLabel *m_sdkVersion;
+    /// As kationd reported them; empty when it could not be reached.
+    QString m_reportedAppVersion;
+    QString m_reportedSdkVersion;
 
     // Saved values (from kationd and kationrc) and the edited ones.
     QSet<QString> m_savedExcluded;

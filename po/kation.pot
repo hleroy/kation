@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: kation 0.2.0\n"
+"Project-Id-Version: kation 0.3.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-11 13:53+0100\n"
+"POT-Creation-Date: 2026-11-11 22:59+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,26 +17,6 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
-
-#: kde/app/main.cpp kde/app/tray.cpp kde/settings/settingswidget.cpp
-#, kde-format
-msgid "Kation"
-msgstr ""
-
-#: kde/app/main.cpp
-#, kde-format
-msgid "Unofficial Proton Drive client for KDE Plasma"
-msgstr ""
-
-#: kde/app/main.cpp
-#, kde-format
-msgid "© 2026 Kation contributors"
-msgstr ""
-
-#: kde/app/main.cpp kde/settings/settingswidget.cpp
-#, kde-format
-msgid "This is a third-party application not officially supported by Proton."
-msgstr ""
 
 #: kde/app/main.cpp
 #, kde-format
@@ -83,6 +63,12 @@ msgstr ""
 #, kde-format
 msgctxt "recent activity"
 msgid "Could not sync %1"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/kationabout.cpp
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Kation"
 msgstr ""
 
 #: kde/app/tray.cpp kde/settings/settingswidget.cpp
@@ -376,6 +362,43 @@ msgstr ""
 msgid "My files"
 msgstr ""
 
+#: kde/settings/kationabout.cpp
+#, kde-format
+msgid "Unofficial Proton Drive client for KDE Plasma"
+msgstr ""
+
+#: kde/settings/kationabout.cpp
+#, kde-format
+msgid "© 2026 Kation contributors"
+msgstr ""
+
+#: kde/settings/kationabout.cpp
+#, kde-format
+msgid "Proton AG"
+msgstr ""
+
+#: kde/settings/kationabout.cpp
+#, kde-format
+msgid "Proton Drive SDK and CLI"
+msgstr ""
+
+#: kde/settings/kationabout.cpp
+#, kde-format
+msgid "This is a third-party application not officially supported by Proton."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgctxt "version"
+msgid "Unknown"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgctxt "version (commit)"
+msgid "%1 (%2)"
+msgstr ""
+
 #: kde/settings/settingswidget.cpp
 #, kde-format
 msgid "Cancel"
@@ -438,6 +461,11 @@ msgstr ""
 
 #: kde/settings/settingswidget.cpp
 #, kde-format
+msgid "About"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
 msgid "Connecting…"
 msgstr ""
 
@@ -483,6 +511,107 @@ msgstr ""
 msgid ""
 "While folder sync is on, the background service starts with your session "
 "either way."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Version %1"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Components"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Background service:"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Proton Drive SDK:"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Qt:"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "KDE Frameworks:"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "System:"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Copy Version Info"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Troubleshooting"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Log file: <b>%1</b>"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Show Log File"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Website"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Report a Bug"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "What’s New"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Security Policy"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "License: %1"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgctxt "separator in a list of licenses"
+msgid ", "
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Licenses: %1"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Thanks to %1: <a href=\"%2\">%3</a>."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Not running"
 msgstr ""
 
 #: kde/settings/settingswidget.cpp

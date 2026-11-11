@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kation 0.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-11 13:53+0100\n"
+"POT-Creation-Date: 2026-11-11 22:49+0100\n"
 "PO-Revision-Date: 2026-11-01 23:30+0100\n"
 "Last-Translator: Kation contributors\n"
 "Language-Team: French <kde-francophone@kde.org>\n"
@@ -14,28 +14,6 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
-
-#: kde/app/main.cpp kde/app/tray.cpp kde/settings/settingswidget.cpp
-#, kde-format
-msgid "Kation"
-msgstr "Kation"
-
-#: kde/app/main.cpp
-#, kde-format
-msgid "Unofficial Proton Drive client for KDE Plasma"
-msgstr "Client Proton Drive non officiel pour KDE Plasma"
-
-#: kde/app/main.cpp
-#, kde-format
-msgid "© 2026 Kation contributors"
-msgstr "© 2026 Les contributeurs de Kation"
-
-#: kde/app/main.cpp kde/settings/settingswidget.cpp
-#, kde-format
-msgid "This is a third-party application not officially supported by Proton."
-msgstr ""
-"Ceci est une application tierce, qui n'est pas officiellement prise en "
-"charge par Proton."
 
 #: kde/app/main.cpp
 #, kde-format
@@ -83,6 +61,12 @@ msgstr "Non synchronisé, son nom ou son chemin est trop long : %1"
 msgctxt "recent activity"
 msgid "Could not sync %1"
 msgstr "%1 : synchronisation impossible"
+
+#: kde/app/tray.cpp kde/settings/kationabout.cpp
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Kation"
+msgstr "Kation"
 
 #: kde/app/tray.cpp kde/settings/settingswidget.cpp
 #, kde-format
@@ -406,6 +390,45 @@ msgstr "Le fichier n'a pas passé la vérification d'intégrité : %1"
 msgid "My files"
 msgstr "Mes fichiers"
 
+#: kde/settings/kationabout.cpp
+#, kde-format
+msgid "Unofficial Proton Drive client for KDE Plasma"
+msgstr "Client Proton Drive non officiel pour KDE Plasma"
+
+#: kde/settings/kationabout.cpp
+#, kde-format
+msgid "© 2026 Kation contributors"
+msgstr "© 2026 Les contributeurs de Kation"
+
+#: kde/settings/kationabout.cpp
+#, kde-format
+msgid "Proton AG"
+msgstr "Proton AG"
+
+#: kde/settings/kationabout.cpp
+#, kde-format
+msgid "Proton Drive SDK and CLI"
+msgstr "SDK et CLI de Proton Drive"
+
+#: kde/settings/kationabout.cpp
+#, kde-format
+msgid "This is a third-party application not officially supported by Proton."
+msgstr ""
+"Ceci est une application tierce, qui n'est pas officiellement prise en "
+"charge par Proton."
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgctxt "version"
+msgid "Unknown"
+msgstr "Inconnue"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgctxt "version (commit)"
+msgid "%1 (%2)"
+msgstr "%1 (%2)"
+
 #: kde/settings/settingswidget.cpp
 #, kde-format
 msgid "Cancel"
@@ -468,6 +491,11 @@ msgstr "Réseau et démarrage"
 
 #: kde/settings/settingswidget.cpp
 #, kde-format
+msgid "About"
+msgstr "À propos"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
 msgid "Connecting…"
 msgstr "Connexion…"
 
@@ -526,6 +554,107 @@ msgid ""
 msgstr ""
 "Tant que la synchronisation de dossier est activée, le service d'arrière-"
 "plan démarre avec votre session dans tous les cas."
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Version %1"
+msgstr "Version %1"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Components"
+msgstr "Composants"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Background service:"
+msgstr "Service d'arrière-plan :"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Proton Drive SDK:"
+msgstr "SDK Proton Drive :"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Qt:"
+msgstr "Qt :"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "KDE Frameworks:"
+msgstr "KDE Frameworks :"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "System:"
+msgstr "Système :"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Copy Version Info"
+msgstr "Copier les versions"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Troubleshooting"
+msgstr "Dépannage"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Log file: <b>%1</b>"
+msgstr "Fichier journal : <b>%1</b>"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Show Log File"
+msgstr "Afficher le fichier journal"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Website"
+msgstr "Site web"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Report a Bug"
+msgstr "Signaler un bogue"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "What’s New"
+msgstr "Nouveautés"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Security Policy"
+msgstr "Politique de sécurité"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "License: %1"
+msgstr "Licence : %1"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgctxt "separator in a list of licenses"
+msgid ", "
+msgstr ", "
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Licenses: %1"
+msgstr "Licences : %1"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Thanks to %1: <a href=\"%2\">%3</a>."
+msgstr "Merci à %1 : <a href=\"%2\">%3</a>."
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Not running"
+msgstr "Non lancé"
 
 #: kde/settings/settingswidget.cpp
 #, kde-format
