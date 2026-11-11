@@ -186,11 +186,16 @@ Proton **test** account (`bun e2e/realAccount.ts --expect-email …`).
 
 ## Releasing
 
-1. Bump `project(VERSION)` in `CMakeLists.txt` and `version` in
+1. Refresh the CI container digests (`debian:trixie`, `fedora:43`,
+   `archlinux:latest` in `ci.yml` and `packages.yml`). They are pinned by
+   digest, which Dependabot does not update: run the command in the comment
+   next to each (`docker buildx imagetools inspect <image>`) and copy the new
+   digest.
+2. Bump `project(VERSION)` in `CMakeLists.txt` and `version` in
    `daemon/package.json` (CMake checks that they match).
-2. Rename `[Unreleased]` in `CHANGELOG.md` to `[x.y.z] - YYYY-MM-DD`, with a
+3. Rename `[Unreleased]` in `CHANGELOG.md` to `[x.y.z] - YYYY-MM-DD`, with a
    compare link.
-3. Merge that, then tag the merged commit on `main` `vx.y.z` and push the
+4. Merge that, then tag the merged commit on `main` `vx.y.z` and push the
    tag.
 
 The Release workflow checks that the tag is on `main` and matches the
@@ -199,8 +204,3 @@ release with the changelog section as notes, `SHA256SUMS` and a build
 provenance attestation for each package. To redo a release, delete it
 and its tag first (`gh release delete vx.y.z --cleanup-tag`): the workflow
 fails when the release already exists.
-
-The CI containers (`debian:trixie`, `fedora:43`, `archlinux:latest` in
-`ci.yml` and `packages.yml`) are pinned by digest, which Dependabot does not
-update. Before a release, refresh them with the command in the comment next to
-each (`docker buildx imagetools inspect <image>`).
