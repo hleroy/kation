@@ -110,10 +110,35 @@ export async function moveToTrash(absolutePath: string, dataHome = defaultDataHo
             throw error;
         }
     }
-    const topDir = await topDirectoryOf(absolutePath);
+    await moveToTopDirTrash(absolutePath, await topDirectoryOf(absolutePath));
+}
+
+/**
+ * Moves an item to `<topDir>/.Trash-<uid>`, the trash of the file system mounted
+ * at `topDir`. Exported for tests.
+ */
+export async function moveToTopDirTrash(absolutePath: string, topDir: string): Promise<void> {
     const uid = process.getuid?.() ?? 0;
+    const trash = path.join(topDir, `.Trash-${uid}`);
+    // Other users may write at the top of a shared disk: use only folders that are ours alone.
+    for (const folder of [trash, path.join(trash, 'files'), path.join(trash, 'info')]) {
+        await ensurePrivateFolder(folder, uid);
+    }
     // Paths in a $topdir trash are relative to $topdir.
-    await moveIntoTrash(absolutePath, path.join(topDir, `.Trash-${uid}`), path.relative(topDir, absolutePath));
+    await moveIntoTrash(absolutePath, trash, path.relative(topDir, absolutePath));
+}
+
+/** Creates a folder only its owner can use, or checks that the existing one is such a folder. */
+async function ensurePrivateFolder(folder: string, uid: number): Promise<void> {
+    await mkdir(folder, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EEXIST') {
+            throw error;
+        }
+    });
+    const info = await lstat(folder);
+    if (!info.isDirectory() || info.uid !== uid || (info.mode & 0o022) !== 0) {
+        throw new Error(`The trash folder ${folder} cannot be trusted: it must be a folder of yours that others cannot write to`);
+    }
 }
 
 async function moveIntoTrash(absolutePath: string, trash: string, infoPath: string): Promise<void> {

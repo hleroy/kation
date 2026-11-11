@@ -6,8 +6,8 @@
  * methods call; it knows nothing about D-Bus itself.
  */
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { open, readdir, rename, stat, unlink, utimes } from 'node:fs/promises';
+import { constants, createReadStream } from 'node:fs';
+import { lstat, open, readdir, rename, stat, unlink, utimes } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { Logger, NodeEntity, NodeResult } from '@protontech/drive-sdk';
@@ -24,7 +24,8 @@ export type TransferOptions = {
     /**
      * Downloads only: keep the partial file when interrupted (as a hidden
      * file next to the destination) and continue from it next time. Used by
-     * sync; resumed downloads are checked against the file's SHA-1.
+     * sync. A resumed download skips the SDK's block and manifest checks: it is
+     * checked against the size and SHA-1 in the file's signed attributes instead.
      */
     resumable?: boolean;
     /**
@@ -39,6 +40,12 @@ const RESUME_CHUNK_SIZE = 1024 * 1024;
 const TRANSIENT_CODES = new Set(['Cancelled', 'Connection', 'RateLimited']);
 
 const OCTET_STREAM = 'application/octet-stream';
+
+// O_NOFOLLOW and O_EXCL: a link planted at a partial file's name is never written through.
+const NEW_PART_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+// O_NONBLOCK: a FIFO swapped in for a partial file fails to open instead of blocking.
+const APPEND_PART_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+const READ_PART_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 export class DriveService {
     /** Speed limits shared by all transfers (sync and online view), set from the settings. */
@@ -150,26 +157,26 @@ export class DriveService {
     async downloadNode(node: NodeEntity, localPath: string, options: TransferOptions = {}): Promise<void> {
         const revision = node.activeRevision;
         const expectedSha1 = revision?.claimedDigests?.sha1;
-        // Resuming needs a checksum to verify the result, as the seekable stream skips the SDK's checks.
-        const resumable = !!options.resumable && !!expectedSha1 && !!revision?.uid;
+        const claimedSize = revision?.claimedSize;
+        // The seekable stream skips the SDK's checks: resuming needs a size and checksum, from
+        // attributes whose signature verified, to check the result against.
+        const resumable =
+            !!options.resumable && !!expectedSha1 && claimedSize !== undefined && !!revision?.uid && revision.contentAuthor.ok;
         const partPath = resumable ? resumablePartPath(localPath, revision!.uid) : `${localPath}.kation-part`;
 
         if (resumable) {
             await removeStaleParts(localPath, partPath);
-            const partSize = (await stat(partPath).catch(() => undefined))?.size ?? 0;
-            const claimedSize = revision?.claimedSize;
-            if (partSize > 0 && (claimedSize === undefined || partSize <= claimedSize)) {
-                if (await this.resumeDownload(node, partPath, partSize, expectedSha1!, options)) {
+            const part = await lstat(partPath).catch(() => undefined);
+            // Only a file of our own: not a link, nor a hard link to a file elsewhere.
+            if (part?.isFile() && part.nlink === 1 && part.size > 0 && part.size <= claimedSize!) {
+                if (await this.resumeDownload(node, partPath, part.size, claimedSize!, expectedSha1!, options)) {
                     await finishDownload(node, partPath, localPath, options);
                     return;
                 }
-            } else if (partSize > 0) {
-                await unlink(partPath).catch(() => {});
             }
         }
 
-        // Default mode (umask applies): downloads into the user's folders get normal permissions.
-        const handle = await open(partPath, 'w');
+        const handle = await createPartFile(partPath);
         let completed = false;
         let keepPart = false;
         try {
@@ -204,23 +211,29 @@ export class DriveService {
 
     /**
      * Continues an interrupted download from `offset`. Returns false (after
-     * deleting the partial file) when the result does not match the checksum,
-     * so the caller downloads the whole file again.
+     * deleting the partial file) when the result does not match the size or
+     * checksum, so the caller downloads the whole file again.
      */
     private async resumeDownload(
         node: NodeEntity,
         partPath: string,
         offset: number,
+        expectedSize: number,
         expectedSha1: string,
         options: TransferOptions,
     ): Promise<boolean> {
         this.logger.info(`Resuming download of ${node.uid} at byte ${offset}`);
+        let size: number;
         try {
             const downloader = await this.sdk.getFileDownloader(node, options.signal);
             const stream = downloader.getSeekableStream();
             await stream.seek(offset);
-            const handle = await open(partPath, 'a');
+            const handle = await open(partPath, APPEND_PART_FLAGS);
             try {
+                const opened = await handle.stat();
+                if (!opened.isFile() || opened.nlink !== 1) {
+                    throw new Error('The partial file was replaced');
+                }
                 let written = offset;
                 while (true) {
                     options.signal?.throwIfAborted();
@@ -235,6 +248,7 @@ export class DriveService {
                         break;
                     }
                 }
+                size = (await handle.stat()).size;
             } finally {
                 await handle.close();
             }
@@ -246,7 +260,18 @@ export class DriveService {
             await unlink(partPath).catch(() => {});
             return false;
         }
-        if ((await sha1Of(partPath, options.signal)) !== expectedSha1) {
+        if (size !== expectedSize) {
+            this.logger.warn(`Resumed download of ${node.uid} has ${size} bytes instead of ${expectedSize}, downloading it again`);
+            await unlink(partPath).catch(() => {});
+            return false;
+        }
+        const sha1 = await sha1OfPart(partPath, options.signal).catch((error: unknown) => {
+            if (options.signal?.aborted) {
+                throw error;
+            }
+            return undefined;
+        });
+        if (sha1 !== expectedSha1) {
             this.logger.warn(`Resumed download of ${node.uid} failed the checksum, downloading it again`);
             await unlink(partPath).catch(() => {});
             return false;
@@ -403,6 +428,49 @@ async function removeStaleParts(localPath: string, currentPart: string): Promise
         if (entry.startsWith(prefix) && entry.endsWith('.kation-part') && candidate !== currentPart) {
             await unlink(candidate).catch(() => {});
         }
+    }
+}
+
+/**
+ * Creates a partial file, replacing whatever has its name. Default mode (the
+ * umask applies): downloads into the user's folders get normal permissions.
+ */
+async function createPartFile(partPath: string) {
+    await unlink(partPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') {
+            throw error;
+        }
+    });
+    try {
+        return await open(partPath, NEW_PART_FLAGS, 0o666);
+    } catch (error: unknown) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'EEXIST' || code === 'ELOOP') {
+            throw new KationError('Failed', `Something else created ${partPath} during the download`, { cause: error });
+        }
+        throw error;
+    }
+}
+
+/** SHA-1 of a partial file, without following a link or blocking on a FIFO swapped in for it. */
+async function sha1OfPart(partPath: string, signal?: AbortSignal): Promise<string> {
+    const handle = await open(partPath, READ_PART_FLAGS);
+    try {
+        if (!(await handle.stat()).isFile()) {
+            throw new Error('The partial file was replaced');
+        }
+        const hash = createHash('sha1');
+        const buffer = Buffer.alloc(RESUME_CHUNK_SIZE);
+        while (true) {
+            signal?.throwIfAborted();
+            const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+            if (bytesRead === 0) {
+                return hash.digest('hex');
+            }
+            hash.update(buffer.subarray(0, bytesRead));
+        }
+    } finally {
+        await handle.close();
     }
 }
 
