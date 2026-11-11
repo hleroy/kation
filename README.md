@@ -48,6 +48,14 @@ sudo pacman -U kation-*-x86_64.pkg.tar.zst       # Arch Linux
 systemctl --user daemon-reload
 ```
 
+Releases after 0.2.0 come with `SHA256SUMS` and build provenance. To check a
+downloaded package (the second command needs the GitHub CLI):
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify kation_*_amd64.deb --repo hleroy/kation
+```
+
 Each package is built for that distribution release. On another
 distribution or release (Ubuntu, KDE neon, …), build Kation from source: see
 [DEVNOTES.md](DEVNOTES.md).

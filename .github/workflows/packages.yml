@@ -21,7 +21,8 @@ jobs:
   deb:
     name: Debian package (Debian 13)
     runs-on: ubuntu-24.04
-    container: debian:trixie
+    # Refresh: docker buildx imagetools inspect debian:trixie
+    container: debian:trixie@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6
     steps:
       - name: Install build dependencies
         run: |
@@ -33,6 +34,7 @@ jobs:
             libkf6statusnotifieritem-dev libkf6windowsystem-dev
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
       - name: Trust the checkout
         run: git config --global --add safe.directory '*'
@@ -69,7 +71,8 @@ jobs:
   rpm:
     name: RPM package (Fedora 43)
     runs-on: ubuntu-24.04
-    container: fedora:43
+    # Refresh: docker buildx imagetools inspect fedora:43
+    container: fedora:43@sha256:f01112b9a1f1d0504ad962d9adfa401425033f8ab067e0a821904ebdde5b8ca5
     steps:
       - name: Install build dependencies
         run: |
@@ -80,6 +83,7 @@ jobs:
             kf6-kstatusnotifieritem-devel kf6-kwindowsystem-devel
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
       - name: Trust the checkout
         run: git config --global --add safe.directory '*'
@@ -118,7 +122,8 @@ jobs:
   arch:
     name: Arch package
     runs-on: ubuntu-24.04
-    container: archlinux:latest
+    # Refresh: docker buildx imagetools inspect archlinux:latest (the job upgrades it anyway)
+    container: archlinux:latest@sha256:d4594bb2300cba11f41c2f27923eb56f63d9988909c402f9c95517d1e362c899
     steps:
       - name: Install build dependencies
         run: |
@@ -128,6 +133,7 @@ jobs:
             kstatusnotifieritem kwindowsystem libsecret
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
       # makepkg refuses to run as root.
       - name: Create a build user

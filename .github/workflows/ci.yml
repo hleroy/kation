@@ -25,6 +25,7 @@ jobs:
       # The type check resolves the SDK sources from the submodule.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -41,7 +42,8 @@ jobs:
   build:
     name: Build and test (Fedora, KDE Frameworks 6)
     runs-on: ubuntu-24.04
-    container: fedora:43
+    # Refresh: docker buildx imagetools inspect fedora:43
+    container: fedora:43@sha256:f01112b9a1f1d0504ad962d9adfa401425033f8ab067e0a821904ebdde5b8ca5
     steps:
       - name: Install build dependencies
         run: |
@@ -52,6 +54,7 @@ jobs:
             kf6-kstatusnotifieritem-devel kf6-knotifications-devel kf6-kcmutils-devel kf6-kwindowsystem-devel
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
       - name: Trust the checkout
         run: git config --global --add safe.directory '*'

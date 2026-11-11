@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A remote item (for example one an editor of a shared folder named) whose name is too long for the local file system (over 255 bytes or characters, or a path too long as a whole) is skipped and reported once in the recent activity, instead of keeping sync in the error state for as long as it exists. Names just under the limit download again: partial downloads of such names use a shorter name.
 - `kationd.service` runs with `NoNewPrivileges`, `LockPersonality`, `RestrictRealtime`, `RestrictSUIDSGID`, `SystemCallArchitectures=native` and `RestrictAddressFamilies` (Unix, IPv4, IPv6, netlink); they also apply to `pass` and `gpg` when kationd uses them.
 - The autostart entries of kationd (without systemd) and of the tray start the program by its absolute path, not through `PATH`; entries written by older versions are rewritten.
+- Releases publish `SHA256SUMS` and a build provenance attestation for each package (`gh attestation verify`); CI checkouts no longer keep their token on disk, and CI containers are pinned by digest.
+- `xml2js`, bundled in kationd through dbus-next, is updated to 0.6.2 (prototype pollution advisory GHSA-776f-qx25-q3cc).
 
 ### Fixed
 
