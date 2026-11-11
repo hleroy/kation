@@ -12,7 +12,7 @@ SPDX-License-Identifier = "MIT"
 
 # Files that cannot carry a comment header.
 [[annotations]]
-path = ["README.md", "DEVNOTES.md", "ROADMAP.md", ".gitmodules", "daemon/.bun-version", "daemon/package.json", "daemon/bun.lock", "daemon/tsconfig.json", "kde/**/*.json", "packaging/copyright", "CHANGELOG.md", "CLAUDE.md", ".claude/settings.json"]
+path = ["README.md", "DEVNOTES.md", "ROADMAP.md", "SECURITY.md", ".gitmodules", "daemon/.bun-version", "daemon/package.json", "daemon/bun.lock", "daemon/tsconfig.json", "kde/**/*.json", "packaging/copyright", "CHANGELOG.md", "CLAUDE.md", ".claude/settings.json"]
 SPDX-FileCopyrightText = "2026 Kation contributors"
 SPDX-License-Identifier = "GPL-2.0-or-later"
 
