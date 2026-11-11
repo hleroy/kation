@@ -24,6 +24,7 @@
 #include <QFileInfo>
 #include <QLocale>
 #include <QMenu>
+#include <QTextDocument>
 #include <QTimer>
 
 namespace
@@ -358,7 +359,8 @@ void KationTray::update()
     // Shown instead of the icon while the status needs attention.
     m_item->setAttentionIconByName(icon);
     m_item->setStatus(itemStatus);
-    m_item->setToolTip(icon, i18n("Kation"), statusText());
+    // The tooltip is rich text; the status holds file names and kationd's messages.
+    m_item->setToolTip(icon, i18n("Kation"), statusText().toHtmlEscaped());
 
     m_statusAction->setText(statusText());
     m_signIn->setVisible(m_reachable && !loggedIn);
@@ -394,7 +396,8 @@ void KationTray::updateActivityMenu()
         if (!detail.isEmpty()) {
             tip += QLatin1Char('\n') + detail;
         }
-        action->setToolTip(tip);
+        // Tooltips detect rich text: make it rich text, with the path escaped.
+        action->setToolTip(Qt::convertFromPlainText(tip));
     }
 }
 

@@ -3,6 +3,7 @@
 
 #include "kationdriveinterface.h"
 #include "kationtypes.h"
+#include "kationweb.h"
 
 #include <KAbstractFileItemActionPlugin>
 #include <KFileItem>
@@ -17,11 +18,11 @@
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
 #include <QDBusReply>
-#include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPointer>
+#include <QTextDocument>
 
 /**
  * "Proton Drive" submenu in Dolphin's context menu, for items in the synced
@@ -66,7 +67,9 @@ public:
                     Q_EMIT error(reply.error().message());
                     return;
                 }
-                QDesktopServices::openUrl(QUrl(reply.value()));
+                if (!Kation::openWebUrl(reply.value())) {
+                    Q_EMIT error(Kation::refusedWebUrlText());
+                }
             });
         });
         return {menu->menuAction()};
@@ -116,11 +119,12 @@ private:
                 linkCopied(reply.value(), name, false);
                 return;
             }
+            // As rich text, with the name escaped: the box would read a name with markup as rich text.
             const auto answer = QMessageBox::question(parent,
                                                       i18n("Create a Public Link?"),
-                                                      i18n("“%1” has no public link yet. Anyone who has the link will be able to view it. "
-                                                           "You can remove the link in the Proton Drive website.",
-                                                           name),
+                                                      Qt::convertFromPlainText(i18n("“%1” has no public link yet. Anyone who has the link will be able to "
+                                                                                    "view it. You can remove the link in the Proton Drive website.",
+                                                                                    name)),
                                                       QMessageBox::Yes | QMessageBox::Cancel,
                                                       QMessageBox::Cancel);
             if (answer != QMessageBox::Yes) {
@@ -144,7 +148,7 @@ private:
         QGuiApplication::clipboard()->setText(link);
         KNotification::event(KNotification::Notification,
                              created ? i18n("Public link created") : i18n("Public link copied"),
-                             i18n("The link to “%1” is in the clipboard.", name),
+                             i18n("The link to “%1” is in the clipboard.", name.toHtmlEscaped()),
                              QStringLiteral("com.hleroy.Kation"));
     }
 

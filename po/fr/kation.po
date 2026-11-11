@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kation 0.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-07 13:30+0100\n"
+"POT-Creation-Date: 2026-11-11 12:51+0100\n"
 "PO-Revision-Date: 2026-11-01 23:30+0100\n"
 "Last-Translator: Kation contributors\n"
 "Language-Team: French <kde-francophone@kde.org>\n"
@@ -319,6 +319,11 @@ msgstr ""
 msgctxt "@info a problem, then the error behind it"
 msgid "%1 (%2)"
 msgstr "%1 (%2)"
+
+#: kde/dbus/kationweb.cpp
+#, kde-format
+msgid "Kation received a web address it will not open."
+msgstr "Kation a reçu une adresse web qu'il refuse d'ouvrir."
 
 #: kde/dolphin/fileitemaction.cpp
 #, kde-format

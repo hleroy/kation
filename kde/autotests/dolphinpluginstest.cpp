@@ -18,16 +18,20 @@
 #include <KPluginMetaData>
 
 #include <QAction>
+#include <QApplication>
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPluginLoader>
 #include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTest>
+#include <QTextDocument>
+#include <QTimer>
 #include <QWidget>
 
 using namespace Qt::StringLiterals;
@@ -187,6 +191,25 @@ void DolphinPluginsTest::offersLinksForProtonItems()
     QCOMPARE(online.size(), 1);
     online.first()->menu()->actions().at(0)->trigger();
     QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith(u"https://drive.proton.me/urls/"_s));
+
+    // A name with markup does not change what the question says.
+    const QString name = u"<b>x<br>y.txt"_s;
+    write(local(name), "marked up");
+    drive.SyncNow().waitForFinished();
+    QTRY_VERIFY_WITH_TIMEOUT(drive.Stat(u"/"_s + name).value().value(u"name"_s).toString() == name, 5000);
+    QString question;
+    QTimer answer;
+    connect(&answer, &QTimer::timeout, this, [&question] {
+        if (auto box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+            question = box->text();
+            box->reject();
+        }
+    });
+    answer.start(20);
+    actionsFor(QUrl::fromLocalFile(local(name))).first()->menu()->actions().at(0)->trigger();
+    QTRY_VERIFY_WITH_TIMEOUT(!question.isEmpty(), 5000);
+    QVERIFY2(question.contains(u"“&lt;b&gt;x&lt;br&gt;y.txt”"_s), qPrintable(question));
+    QVERIFY(Qt::mightBeRichText(question));
 }
 
 void DolphinPluginsTest::menuBuilderPicksThePlugin()

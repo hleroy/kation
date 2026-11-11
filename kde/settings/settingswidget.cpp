@@ -5,6 +5,7 @@
 #include "kationdriveinterface.h"
 #include "kationtexts.h"
 #include "kationtypes.h"
+#include "kationweb.h"
 #include "trayautostart.h"
 
 #include <KIO/JobUiDelegateFactory>
@@ -16,7 +17,6 @@
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
 #include <QDateTime>
-#include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -212,8 +212,8 @@ void KationSettingsWidget::buildGeneralTab(QWidget *tab)
     connect(m_details, &QLabel::linkActivated, this, [this](const QString &link) {
         if (link == QLatin1String("protondrive:/")) {
             openUrl(QUrl(link));
-        } else {
-            QDesktopServices::openUrl(QUrl(link));
+        } else if (!Kation::openWebUrl(link)) {
+            showError(Kation::refusedWebUrlText());
         }
     });
     connect(m_syncToggle, &QPushButton::clicked, this, &KationSettingsWidget::toggleSync);
@@ -443,7 +443,9 @@ void KationSettingsWidget::signIn()
             showError(reply.error().message());
             return;
         }
-        QDesktopServices::openUrl(QUrl(reply.value()));
+        if (!Kation::openWebUrl(reply.value())) {
+            showError(Kation::refusedWebUrlText());
+        }
     });
 }
 

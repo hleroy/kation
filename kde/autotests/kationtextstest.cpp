@@ -8,6 +8,7 @@
  */
 
 #include "kationtexts.h"
+#include "kationweb.h"
 
 #include <QTest>
 
@@ -25,6 +26,8 @@ private Q_SLOTS:
     void safetyPause();
     void problems();
     void french();
+    void webUrls_data();
+    void webUrls();
 };
 
 void KationTextsTest::syncReasons_data()
@@ -101,6 +104,29 @@ void KationTextsTest::french()
     QCOMPARE(Kation::syncReasonText({{u"reason"_s, u"signedOut"_s}}), u"Connectez-vous pour synchroniser."_s);
     QCOMPARE(Kation::syncReasonText({{u"reason"_s, u"deletions"_s}, {u"deletionLimit"_s, 100u}}),
              u"Plus de 100 éléments seraient supprimés d'un coup. Vérifiez le dossier synchronisé, puis reprenez la synchronisation pour continuer."_s);
+}
+
+void KationTextsTest::webUrls_data()
+{
+    QTest::addColumn<QString>("url");
+    QTest::addColumn<bool>("accepted");
+    QTest::newRow("https") << u"https://account.proton.me/x"_s << true;
+    QTest::newRow("https with query") << u"https://drive.proton.me/urls/ABC#key"_s << true;
+    QTest::newRow("file") << u"file:///etc/passwd"_s << false;
+    QTest::newRow("javascript") << u"javascript:alert(1)"_s << false;
+    QTest::newRow("smb") << u"smb://host/share"_s << false;
+    QTest::newRow("http") << u"http://example.org"_s << false;
+    QTest::newRow("empty") << QString() << false;
+    QTest::newRow("no host") << u"https:"_s << false;
+    QTest::newRow("no host, path") << u"https:/etc/passwd"_s << false;
+    QTest::newRow("relative") << u"account.proton.me/x"_s << false;
+}
+
+void KationTextsTest::webUrls()
+{
+    QFETCH(QString, url);
+    QFETCH(bool, accepted);
+    QCOMPARE(Kation::isWebUrl(url), accepted);
 }
 
 QTEST_GUILESS_MAIN(KationTextsTest)

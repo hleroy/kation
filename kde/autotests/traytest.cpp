@@ -10,6 +10,8 @@
 #include "fakekationd.h"
 #include "kationdriveinterface.h"
 
+#include <KStatusNotifierItem>
+
 #include <QAction>
 #include <QDir>
 #include <QFile>
@@ -17,6 +19,7 @@
 #include <QMenu>
 #include <QSignalSpy>
 #include <QTest>
+#include <QTextDocument>
 
 using namespace Qt::StringLiterals;
 
@@ -28,6 +31,7 @@ private Q_SLOTS:
     void initTestCase();
     void cleanupTestCase();
     void followsSyncAndNotifiesConflicts();
+    void escapesFileNamesInTheTooltip();
     void shipsItsStateIcons();
 
 private:
@@ -129,6 +133,39 @@ void TrayTest::followsSyncAndNotifiesConflicts()
     QTRY_VERIFY(!QFileInfo::exists(local(u".directory"_s)));
     QVERIFY(!action("pause")->isVisible());
     QVERIFY(!action("openFolder")->isVisible());
+}
+
+void TrayTest::escapesFileNamesInTheTooltip()
+{
+    // Slow transfers, so the file being synced shows in the status.
+    QVERIFY2(m_kationd->stop(), "kationd did not exit cleanly");
+    QProcessEnvironment slow;
+    slow.insert(u"KATION_FAKE_CHUNK_DELAY_MS"_s, u"300"_s);
+    m_kationd = std::make_unique<FakeKationd>(m_home, slow);
+    QVERIFY(m_kationd->start());
+    m_tray = std::make_unique<KationTray>();
+    QTRY_COMPARE(m_tray->statusText(), u"Sync is off"_s);
+
+    const QString name = u"<b>x<br>y.txt"_s;
+    write(local(name), QByteArray(512 * 1024, 'x'));
+    KationDriveInterface drive(Kation::serviceName, Kation::objectPath, QDBusConnection::sessionBus());
+    drive.SetSyncEnabled(true).waitForFinished();
+    QTRY_VERIFY_WITH_TIMEOUT(m_tray->statusText().contains(name), 10000);
+
+    auto item = m_tray->findChild<KStatusNotifierItem *>();
+    QVERIFY(item);
+    QVERIFY2(item->toolTipSubTitle().contains(u"&lt;b&gt;x&lt;br&gt;y.txt"_s), qPrintable(item->toolTipSubTitle()));
+    QVERIFY(!item->toolTipSubTitle().contains(name));
+    QVERIFY(m_tray->menu()->actions().first()->text().contains(name));
+
+    // The activity menu's tooltips show the path as text too.
+    auto activity = m_tray->menu()->findChild<QMenu *>(u"activity"_s);
+    QTRY_VERIFY_WITH_TIMEOUT(!activity->actions().isEmpty() && activity->actions().first()->text().contains(name), 20000);
+    const QString tip = activity->actions().first()->toolTip();
+    QVERIFY2(Qt::mightBeRichText(tip) && tip.contains(u"&lt;b&gt;x&lt;br&gt;y.txt"_s), qPrintable(tip));
+
+    drive.SetSyncEnabled(false).waitForFinished();
+    QTRY_COMPARE(m_tray->statusText(), u"Sync is off"_s);
 }
 
 void TrayTest::shipsItsStateIcons()
