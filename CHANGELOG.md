@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-11
+
+### TL;DR
+
+This release comes out of a thorough security review of the whole of Kation (kationd, the KDE side, packaging and releases), done with Claude Fable 5.2. Nothing serious came out of it: no finding can be used by a stranger over the network, and each needs a specific situation to matter, such as a crafted name from someone you share a folder with, a crafted file in a folder you run `kationd` from, another user on the same computer, or an unusual setup. They are all fixed below, along with some hardening (a sandboxed service, private data files, checksums and provenance for the packages). Updating is recommended.
+
 ### Security
 
 - `kationd` no longer runs code or reads settings from the folder it is started in (`bunfig.toml`, `.env`, `node_modules`): a file planted in a synced or downloaded folder could run code when a `kationd` command was run there.
@@ -65,6 +71,7 @@ Initial release; its scope is in [ROADMAP.md](ROADMAP.md).
 - Debian, Fedora and Arch packages: `./build-package.sh` builds one for the distribution it runs on.
 - GitHub releases come with packages for Debian 13, Fedora 43 and Arch Linux.
 
-[Unreleased]: https://github.com/hleroy/kation/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/hleroy/kation/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/hleroy/kation/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/hleroy/kation/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hleroy/kation/releases/tag/v0.1.0
