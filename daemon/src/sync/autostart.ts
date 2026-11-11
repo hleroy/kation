@@ -34,8 +34,9 @@ export type AutostartOptions = {
  * the autostart entry does not depend on PATH; "kationd" otherwise (run by Bun
  * from the sources, where process.execPath is Bun).
  */
-export function runningProgram(): string {
-    return Bun.main.startsWith('/$bunfs/') ? process.execPath : 'kationd';
+export function runningProgram(main = Bun.main, execPath = process.execPath): string {
+    // Read from /proc/self/exe: once a package upgrade replaced the file, Linux adds " (deleted)".
+    return main.startsWith('/$bunfs/') ? execPath.replace(/ \(deleted\)$/, '') : 'kationd';
 }
 
 /** One argument of a desktop entry's Exec key, quoted and escaped as the Desktop Entry specification says. */

@@ -97,5 +97,9 @@ describe('Autostart', () => {
     it('names the running program only when it is the compiled kationd', () => {
         // Under bun test, the running program is Bun itself.
         expect(runningProgram()).toBe('kationd');
+        expect(runningProgram('/$bunfs/root/kationd', '/usr/bin/kationd')).toBe('/usr/bin/kationd');
+        // Replaced by an upgrade while running.
+        expect(runningProgram('/$bunfs/root/kationd', '/usr/bin/kationd (deleted)')).toBe('/usr/bin/kationd');
+        expect(runningProgram('/home/u/kation/daemon/src/main.ts', '/home/u/.bun/bin/bun')).toBe('kationd');
     });
 });

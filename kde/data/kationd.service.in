@@ -18,9 +18,8 @@ ExecStart=@KDE_INSTALL_FULL_BINDIR@/kationd serve
 Restart=on-failure
 RestartSec=10
 Slice=background.slice
-# Hardening that works in a user manager everywhere (no mount namespaces). Programs
-# kationd starts inherit it: systemctl, and pass and gpg with KATION_CREDENTIALS_STORE=pass.
-# No MemoryDenyWriteExecute (Bun's JIT) and no UMask (downloads keep the user's umask).
+# Options that work in any user manager; programs kationd starts (systemctl, pass) inherit them.
+# Not MemoryDenyWriteExecute (Bun's JIT) nor UMask (downloads keep the user's umask).
 NoNewPrivileges=yes
 LockPersonality=yes
 RestrictRealtime=yes
