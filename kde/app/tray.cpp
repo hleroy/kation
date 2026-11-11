@@ -398,7 +398,8 @@ void KationTray::updateActivityMenu()
             }
         });
         QString tip = activity.value(QStringLiteral("path")).toString() + QLatin1Char('\n') + QLocale().toString(time, QLocale::ShortFormat);
-        const QString detail = activity.value(QStringLiteral("detail")).toString();
+        // A skipped item's detail is a code, already worded by activityText().
+        const QString detail = kind == QLatin1String("skipped") ? QString() : activity.value(QStringLiteral("detail")).toString();
         if (!detail.isEmpty()) {
             tip += QLatin1Char('\n') + detail;
         }

@@ -23,7 +23,7 @@ import path from 'node:path';
 import { type DriveEvent, DriveEventType, type Logger, type NodeEntity } from '@protontech/drive-sdk';
 
 import type { DriveService } from '../service/driveService';
-import { sha1Of } from '../service/driveService';
+import { MAX_NAME_BYTES, sha1Of } from '../service/driveService';
 import { isFolder, nodeName } from '../service/entry';
 import { KationError, toKationError } from '../service/errors';
 import type { DriveSdk } from '../service/sdk';
@@ -153,8 +153,6 @@ type Callbacks = 'onStatus' | 'onActivity' | 'onItemsChanged';
 export const SAFETY_PAUSE_META = 'safetyPause';
 
 const PASS_ABORTING_CODES = new Set(['RateLimited', 'Connection', 'NotLoggedIn', 'Cancelled']);
-/** Longest file name Linux file systems take, in bytes. */
-const MAX_NAME_BYTES = 255;
 const MAX_RETRY_DELAY_MS = 10 * 60 * 1000;
 
 export class SyncEngine {
@@ -779,6 +777,12 @@ export class SyncEngine {
                 continue;
             }
             if (!node.name.ok) {
+                const tooLong = tooLongName(node.name.error);
+                if (tooLong !== undefined && !this.options.state.byRemoteUid(node.uid)) {
+                    // Never synced: kept under its name, which reconcileFolder skips as too long.
+                    items.set(tooLong, { ...remoteItemFromNode(node), name: tooLong });
+                    continue;
+                }
                 // An item we cannot name would look like a deletion of the local copy.
                 // Skip the whole folder until it lists cleanly.
                 throw new Error(`An item in ${context.path} could not be decrypted; this folder is skipped for now`);
@@ -1515,6 +1519,12 @@ function hasRemoteChange(remote: RemoteItem | undefined, base: BaseEntry | undef
 /** Proton Docs and Sheets only exist online; they cannot be downloaded as files. */
 function isProtonDocument(node: NodeEntity): boolean {
     return node.mediaType?.startsWith('application/vnd.proton.') ?? false;
+}
+
+/** The name the SDK refused as too long (InvalidNameError), or undefined for any other name error. */
+function tooLongName(error: unknown): string | undefined {
+    const name = (error as { name?: unknown } | undefined)?.name;
+    return !(error instanceof Error) && typeof name === 'string' && Buffer.byteLength(name) > MAX_NAME_BYTES ? name : undefined;
 }
 
 function isNameTooLong(error: unknown): boolean {

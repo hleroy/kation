@@ -92,7 +92,8 @@ function printableError(error: unknown): unknown {
     Object.defineProperties(copy, {
         name: { value: error.name, writable: true, configurable: true },
         message: { value: message, writable: true, configurable: true },
-        stack: { value: error.stack?.replace(error.message, message), writable: true, configurable: true },
+        // A function, so "$&" and the like in a name are not replacement patterns.
+        stack: { value: error.stack?.replace(error.message, () => message), writable: true, configurable: true },
         cause: { value: error.cause, writable: true, configurable: true },
     });
     return copy;

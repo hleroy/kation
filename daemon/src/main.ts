@@ -129,6 +129,11 @@ const ACTIVITY_LABELS: Record<string, string> = {
     skipped: 'Not synced',
 };
 
+/** Activity detail codes (see GetRecentActivity in the interface XML). */
+const ACTIVITY_DETAILS: Record<string, string> = {
+    nameTooLong: 'its name or path is too long for this computer',
+};
+
 /** A path in "My files", a local path or a URL, as the URL the service expects. */
 export function itemUrl(item: string, cwd = process.cwd()): string {
     if (/^(protondrive|file):/.test(item)) {
@@ -176,7 +181,8 @@ async function runThroughService(service: ServiceClient, command: string, args: 
             const activity = ((await service.call('GetRecentActivity')) as unknown[]).map(unwrap);
             const lines = activity.map((item) => {
                 const time = new Date(Number(item.time) * 1000).toLocaleString();
-                const detail = item.detail ? ` (${printable(String(item.detail))})` : '';
+                const detailText = item.kind === 'skipped' ? (ACTIVITY_DETAILS[String(item.detail)] ?? item.detail) : item.detail;
+                const detail = detailText ? ` (${printable(String(detailText))})` : '';
                 return `${time}  ${ACTIVITY_LABELS[String(item.kind)] ?? printable(String(item.kind))}: ${printable(String(item.path))}${detail}`;
             });
             print(json, activity, lines.length > 0 ? lines.join('\n') : 'No sync activity since the service started.');
@@ -243,7 +249,7 @@ async function runThroughService(service: ServiceClient, command: string, args: 
             const currentExcluded = async () => (unwrap(await service.call('GetSyncStatus')).excluded as string[]) ?? [];
             if (action === 'excluded') {
                 const excluded = await currentExcluded();
-                print(json, excluded, excluded.length > 0 ? excluded.join('\n') : 'No folders are excluded.');
+                print(json, excluded, excluded.length > 0 ? excluded.map(printable).join('\n') : 'No folders are excluded.');
                 return;
             }
             const actions: Record<string, () => Promise<unknown>> = {

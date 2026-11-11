@@ -384,7 +384,9 @@ export class FakeDrive {
         return {
             uid: node.uid,
             parentUid: node.parentUid,
-            name: { ok: true, value: node.name },
+            // As the SDK's validateNodeName: longer than 255 UTF-16 units is an invalid name.
+            name:
+                node.name.length > 255 ? { ok: false, error: { name: node.name, error: 'Name too long' } } : { ok: true, value: node.name },
             keyAuthor: { ok: true, value: 'tester@example.com' },
             nameAuthor: { ok: true, value: 'tester@example.com' },
             directRole: 'admin',

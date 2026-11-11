@@ -1065,6 +1065,30 @@ describe('SyncEngine', () => {
             expect((await readdir(ctx.root)).sort()).toEqual(['.kation-sync', 'normal.txt']);
         });
 
+        it('skips a name the SDK accepts but that is too long in bytes', async () => {
+            const activity: string[] = [];
+            const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`) });
+            const accented = `${'é'.repeat(200)}.txt`;
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: accented, type: NodeType.File, content: 'long' });
+            await ctx.engine.start();
+            await ctx.settle();
+
+            expect(ctx.engine.getStatus().state).toBe('idle');
+            expect(activity).toEqual([`skipped /${accented} nameTooLong`]);
+        });
+
+        it('keeps the local copy of a synced file renamed to a name too long to list', async () => {
+            const ctx = await setup();
+            const file = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'a.txt', type: NodeType.File, content: 'a' });
+            await ctx.engine.start();
+            await ctx.settle();
+            await ctx.fake.sdk.renameNode(file.uid, longName);
+            await untilError(ctx.engine);
+
+            expect(await readFile(ctx.local('a.txt'), 'utf8')).toBe('a');
+            expect(await ctx.trashed()).toEqual([]);
+        });
+
         it('skips a remote folder whose path is too long for the file system', async () => {
             const activity: string[] = [];
             const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`) });

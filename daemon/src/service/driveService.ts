@@ -420,7 +420,7 @@ export function resumablePartPath(localPath: string, revisionUid: string): strin
 }
 
 /** Longest file name Linux file systems take, in bytes. */
-const MAX_NAME_BYTES = 255;
+export const MAX_NAME_BYTES = 255;
 
 /**
  * `<name><suffix>` next to the file (with a leading dot when hidden). When that is

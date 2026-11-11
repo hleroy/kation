@@ -90,7 +90,8 @@ describe('log lines', () => {
         const config = getConfig({ appVersion: 'test', sdkVersion: 'test', home, env: {} });
         const { telemetry, flush } = initTelemetry(config);
         const logger = telemetry.getLogger('test');
-        const forged = 'a.txt\n2026-11-11T00:00:00.000Z ERROR [kationd] forged';
+        // "$&" would bring the raw text back if used as a replacement pattern.
+        const forged = 'a$&.txt\n2026-11-11T00:00:00.000Z ERROR [kationd] forged';
         logger.info(`Downloading /${forged}`);
         logger.error('Failed to sync', new Error(`Not found: /${forged}`));
         await flush();
@@ -99,6 +100,6 @@ describe('log lines', () => {
         const lines = content.trimEnd().split('\n');
         expect(lines.filter((line) => line.includes('forged'))).toHaveLength(3);
         expect(lines.some((line) => line.startsWith('2026-11-11T00:00:00.000Z'))).toBe(false);
-        expect(lines[0]).toContain('Downloading /a.txt\\n2026-11-11T00:00:00.000Z ERROR [kationd] forged');
+        expect(lines[0]).toContain('Downloading /a$&.txt\\n2026-11-11T00:00:00.000Z ERROR [kationd] forged');
     });
 });
