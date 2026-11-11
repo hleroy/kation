@@ -118,10 +118,15 @@ ProtonDriveWorker::ProtonDriveWorker(const QByteArray &poolSocket, const QByteAr
     m_drive->setTimeout(MetadataTimeoutMs);
     m_transfers->setTimeout(std::numeric_limits<int>::max());
 
-    // Spool files hold file content while it passes between KIO and kationd.
-    m_spoolDir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + QStringLiteral("/kation/spool");
+    // Spool files hold file content while it passes between KIO and kationd. The
+    // worker may create kationd's cache folder first: both are the user's only.
+    const auto ownerOnly = QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner;
+    const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + QStringLiteral("/kation");
+    QDir().mkpath(cacheDir);
+    QFile::setPermissions(cacheDir, ownerOnly);
+    m_spoolDir = cacheDir + QStringLiteral("/spool");
     QDir().mkpath(m_spoolDir);
-    QFile::setPermissions(m_spoolDir, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    QFile::setPermissions(m_spoolDir, ownerOnly);
     const QDateTime staleBefore = QDateTime::currentDateTime().addSecs(-StaleSpoolAgeSecs);
     for (QDirIterator it(m_spoolDir, QDir::Files); it.hasNext();) {
         const QFileInfo info = it.nextFileInfo();

@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Kation contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-import { mkdirSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync } from 'node:fs';
+import { readdir, rm, truncate } from 'node:fs/promises';
+import path from 'node:path';
 
 import {
     ConsoleLogHandler,
@@ -18,12 +20,17 @@ import type { Config } from './config';
 import { FileLogHandler } from './proton/telemetry/fileHandler';
 import { ColoredLogFormatter } from './proton/telemetry/logFormatters';
 
+/** The name FileLogHandler gives the current log; rotated ones add `.1` to `.5`. */
+const LOG_FILE_NAME = 'kationd.log';
+
 /**
  * Local-only telemetry: logs and SDK metrics go to a rotating log file (and
  * optionally the console). Nothing is sent to Proton or anywhere else.
  */
 export function initTelemetry(config: Config) {
     mkdirSync(config.logDir, { recursive: true, mode: 0o700 });
+    // The copied handler creates the log with the umask's mode; create it private first.
+    closeSync(openSync(path.join(config.logDir, LOG_FILE_NAME), 'a', 0o600));
     const fileHandler = new FileLogHandler(config.logDir);
     const logHandlers: LogHandler[] = [cancellationIsNotAnError(fileHandler)];
     const metricHandlers: MetricHandler<MetricEvent>[] = [fileHandler];
@@ -40,6 +47,18 @@ export function initTelemetry(config: Config) {
     return {
         telemetry,
         flush: () => fileHandler.flush(),
+        /** Deletes the rotated logs and empties the current one, which stays open. */
+        clearLog: async () => {
+            await fileHandler.flush();
+            // The handler appends: later lines start at the beginning again. Truncated before
+            // deleting the rotated logs: a rotation meanwhile moves the old log to one of them.
+            await truncate(path.join(config.logDir, LOG_FILE_NAME), 0).catch(() => {});
+            for (const name of await readdir(config.logDir).catch(() => [] as string[])) {
+                if (name.startsWith(`${LOG_FILE_NAME}.`) && /^\d+$/.test(name.slice(LOG_FILE_NAME.length + 1))) {
+                    await rm(path.join(config.logDir, name), { force: true });
+                }
+            }
+        },
     };
 }
 

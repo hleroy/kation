@@ -5,7 +5,15 @@ import { describe, expect, it } from 'bun:test';
 import { chmod, lstat, mkdir, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { conflictName, isIgnoredName, isLinkOrSpecial, moveToTopDirTrash, moveToTrash, scanFolder } from '../src/sync/local';
+import {
+    conflictName,
+    isIgnoredName,
+    isLinkOrSpecial,
+    moveToTopDirTrash,
+    moveToTrash,
+    removeResumableParts,
+    scanFolder,
+} from '../src/sync/local';
 import { childPath, nameOf, parentOf, SyncState } from '../src/sync/state';
 import { tempDir } from './helpers';
 
@@ -121,6 +129,40 @@ describe('local helpers', () => {
         });
     });
 
+    it('deletes resumable partial downloads, and only those', async () => {
+        const root = await tempDir();
+        await mkdir(path.join(root, 'Docs', 'Deep'), { recursive: true });
+        await mkdir(path.join(root, 'Videos'));
+        const parts = [path.join(root, '.a.txt.0123abcd.kation-part'), path.join(root, 'Docs', 'Deep', '.b c.pdf.deadbeef.kation-part')];
+        for (const part of parts) {
+            await writeFile(part, 'partial');
+        }
+        const kept = [
+            path.join(root, 'a.txt'),
+            path.join(root, 'report.kation-part'),
+            path.join(root, '.a.txt.nothex12.kation-part'),
+            path.join(root, 'Videos', '.v.mp4.0123abcd.kation-part'),
+        ];
+        for (const file of kept) {
+            await writeFile(file, 'keep');
+        }
+        const outside = path.join(await tempDir(), 'target');
+        await writeFile(outside, 'keep');
+        await symlink(outside, path.join(root, 'Docs', '.l.txt.0123abcd.kation-part'));
+        await symlink(path.dirname(outside), path.join(root, 'Docs', 'linked'));
+
+        await removeResumableParts(root, ['/Videos']);
+        for (const part of parts) {
+            expect(await Bun.file(part).exists()).toBe(false);
+        }
+        for (const file of kept) {
+            expect(await readFile(file, 'utf8')).toBe('keep');
+        }
+        expect((await lstat(path.join(root, 'Docs', '.l.txt.0123abcd.kation-part'))).isSymbolicLink()).toBe(true);
+        expect(await readFile(outside, 'utf8')).toBe('keep');
+        await removeResumableParts(path.join(root, 'missing'), []);
+    });
+
     it('names conflict copies', () => {
         const date = new Date(2026, 10, 1, 10, 42);
         expect(conflictName('report.pdf', date)).toBe('report (conflict 2026-11-01 1042).pdf');
@@ -173,6 +215,43 @@ describe('SyncState', () => {
         state.removePending('/A');
         state.clear();
         expect(state.getMeta('rootUid')).toBeUndefined();
+    });
+
+    it('keeps its database files private', async () => {
+        const file = path.join(await tempDir(), 'sync.sqlite');
+        const state = new SyncState(file);
+        for (const name of [file, `${file}-wal`, `${file}-shm`]) {
+            expect((await stat(name)).mode & 0o777).toBe(0o600);
+        }
+        state.close();
+    });
+
+    it('leaves no trace of cleared entries in its files', async () => {
+        const file = path.join(await tempDir(), 'sync.sqlite');
+        const state = new SyncState(file);
+        const secret = '/Very Secret Folder/tax-return-2026.pdf';
+        for (let i = 0; i < 50; i++) {
+            state.put({
+                path: `${secret}.${i}`,
+                type: 'file',
+                localSize: 1,
+                localMtime: 2,
+                remoteUid: `u${i}`,
+                remoteRevision: 'r',
+                remoteSha1: 's',
+            });
+        }
+        state.setMeta('rootUid', 'root-1');
+        state.setMeta('lastSync', '123');
+        expect(state.clear(['rootUid'])).toBe(true);
+        expect(state.getMeta('rootUid')).toBe('root-1');
+        expect(state.getMeta('lastSync')).toBeUndefined();
+        expect(state.count()).toBe(0);
+        for (const name of [file, `${file}-wal`]) {
+            const bytes = Buffer.from(await readFile(name).catch(() => Buffer.alloc(0)));
+            expect(bytes.includes('tax-return-2026')).toBe(false);
+        }
+        state.close();
     });
 
     it('splits paths', () => {

@@ -7,7 +7,7 @@
  * side changed. Stored in SQLite so sync resumes after a restart.
  */
 import { Database } from 'bun:sqlite';
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
 export type EntryType = 'file' | 'folder';
@@ -54,6 +54,8 @@ export class SyncState {
     constructor(file: string) {
         mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
         this.db = new Database(file, { create: true });
+        // Deleted rows are overwritten, so signing out leaves no paths in the file.
+        this.db.run('PRAGMA secure_delete = ON');
         this.db.run('PRAGMA journal_mode = WAL');
         this.db.run('PRAGMA synchronous = NORMAL');
         this.db.run(`CREATE TABLE IF NOT EXISTS entries (
@@ -71,6 +73,12 @@ export class SyncState {
         this.db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
         // Folders with remote changes not yet synced; survives restarts.
         this.db.run('CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY)');
+        // The WAL files exist from here on. SQLite gives new files the umask's mode.
+        for (const name of [file, `${file}-wal`, `${file}-shm`]) {
+            try {
+                chmodSync(name, 0o600);
+            } catch {}
+        }
     }
 
     get(path: string): BaseEntry | undefined {
@@ -148,10 +156,25 @@ export class SyncState {
             .map((row) => row.path);
     }
 
-    clear(): void {
-        this.db.run('DELETE FROM entries');
-        this.db.run('DELETE FROM meta');
-        this.db.run('DELETE FROM pending');
+    /**
+     * Deletes everything but the metadata keys in `keep`, then compacts the files
+     * so no deleted row stays in them. Returns false if compacting failed (for
+     * example on a full disk); the deletion itself is done either way.
+     */
+    clear(keep: string[] = []): boolean {
+        this.db.transaction(() => {
+            this.db.run('DELETE FROM entries');
+            this.db.run('DELETE FROM pending');
+            const placeholders = keep.map(() => '?').join(', ');
+            this.db.query(`DELETE FROM meta WHERE key NOT IN (${placeholders})`).run(...keep);
+        })();
+        try {
+            this.db.run('VACUUM');
+            this.db.run('PRAGMA wal_checkpoint(TRUNCATE)');
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     close(): void {

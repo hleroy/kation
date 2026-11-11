@@ -6,8 +6,6 @@
  * storage, caches and event cursors. Adapted from the Proton Drive CLI's
  * `init.ts` (MIT), without telemetry upload and Photos.
  */
-import { mkdir } from 'node:fs/promises';
-
 import { CryptoProxy } from '@protontech/crypto';
 import { Api as CryptoApi } from '@protontech/crypto/proxy/endpoint/api.ts';
 import { FeatureFlags, type Logger, OpenPGPCryptoWithCryptoProxy, ProtonDriveClient } from '@protontech/drive-sdk';
@@ -15,6 +13,7 @@ import { FeatureFlags, type Logger, OpenPGPCryptoWithCryptoProxy, ProtonDriveCli
 import type { Config } from './config';
 import { type EventObserver, EventPoller } from './events';
 import { ReportingStore } from './keyring';
+import { clearAfterSignOut, privateDirsOf, securePrivateDirs } from './privateDirs';
 import { type ApiClient, initApi } from './proton/api';
 import { createCaches } from './proton/cache';
 import { getOrGenerateClientUid } from './proton/clientUid';
@@ -30,15 +29,15 @@ const FEATURE_FLAGS: Partial<Record<FeatureFlags, boolean>> = {
 export type Drive = Awaited<ReturnType<typeof openDrive>>;
 
 export async function openDrive(config: Config, options: { onEvent?: EventObserver } = {}) {
-    await Promise.all([
-        mkdir(config.cacheDir, { recursive: true, mode: 0o700 }),
-        mkdir(config.appDir, { recursive: true, mode: 0o700 }),
-        mkdir(config.logDir, { recursive: true, mode: 0o700 }),
-    ]);
+    // Before anything opens a file in them.
+    const warnings = await securePrivateDirs(privateDirsOf(config));
 
-    const { telemetry, flush: flushTelemetry } = initTelemetry(config);
+    const { telemetry, flush: flushTelemetry, clearLog } = initTelemetry(config);
     const logger: Logger = telemetry.getLogger('kationd');
     logger.info(`Starting: app=${config.appVersion} sdk=${config.sdkVersion}`);
+    for (const warning of warnings) {
+        logger.warn(warning);
+    }
 
     const openPGPCryptoModule = initOpenPGPCryptoModule();
     let store: ReportingStore | undefined;
@@ -66,6 +65,12 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
     const sdk = new ProtonDriveClient(sdkDependencies);
     // Started by `kationd serve` while signed in; other commands do not poll.
     const events = new EventPoller(logger, sdk, eventsProvider, options.onEvent);
+    // Again: on a first start, the code copied from the Proton CLI just created files with the umask's mode.
+    for (const warning of await securePrivateDirs(privateDirsOf(config))) {
+        if (!warnings.includes(warning)) {
+            logger.warn(warning);
+        }
+    }
 
     return {
         config,
@@ -86,6 +91,8 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
             await auth.logout();
             await Promise.allSettled([events.clear(), caches.cryptoCache.clear(), caches.entitiesCache.clear()]);
         },
+        /** After signOut and the sync state: deletes the spool files and the log. */
+        clearLocalData: () => clearAfterSignOut(config.cacheDir, clearLog, logger),
         async dispose() {
             await events.stop();
             await eventsProvider.dispose();

@@ -49,7 +49,10 @@
     </method>
     <method name="CancelLogin"/>
 
-    <!-- Ends the session on Proton's servers and deletes local data. -->
+    <!-- Ends the session on Proton's servers and deletes, on this computer,
+         the session, the caches, the sync state and recent activity, the log,
+         the partial downloads in the sync folder and the KIO worker's spool
+         files. The files in the sync folder and the settings stay. -->
     <method name="Logout"/>
 
     <method name="Stat">

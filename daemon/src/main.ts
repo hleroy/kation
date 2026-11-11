@@ -21,13 +21,17 @@ import { getConfig } from './config';
 import { type Drive, openDrive } from './drive';
 import { listFolder, nodeName, resolvePath } from './drivePaths';
 import { serve } from './service/serve';
+import { forgetSyncedFiles } from './sync/controller';
+import { SettingsStore } from './sync/settings';
+import { SyncState } from './sync/state';
 
 const USAGE = `Usage: kationd <command> [options]
 
 Commands:
   serve          Run the background service for the KDE components
   login          Sign in to Proton Drive in your browser
-  logout         Sign out and delete local caches
+  logout         Sign out; delete the caches, sync state, log and partial
+                 downloads (synced files and settings stay)
   status         Show whether you are signed in
   ls [PATH]      List a folder in "My files" (default: /)
   sync [ACTION]  Folder sync: status (default), on, off, pause, resume, now,
@@ -309,6 +313,17 @@ const LOCAL_COMMANDS: Record<string, Handler> = {
 
     async logout(drive, _args, json) {
         await drive.signOut();
+        // What the service deletes on sign-out (afterLogout in serve.ts).
+        const stateFile = path.join(drive.config.appDir, 'sync.sqlite');
+        if (existsSync(stateFile)) {
+            const state = new SyncState(stateFile);
+            try {
+                await forgetSyncedFiles(state, new SettingsStore(drive.config.configDir, drive.config.homeDir).load(), drive.logger);
+            } finally {
+                state.close();
+            }
+        }
+        await drive.clearLocalData();
         print(json, { loggedIn: false }, 'Signed out.');
     },
 

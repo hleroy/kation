@@ -76,6 +76,7 @@ private Q_SLOTS:
     void listsEmptyRoot();
     void createsFolders();
     void putsAndGetsFiles();
+    void keepsItsCacheFolderPrivate();
     void copiesLocalFilesBothWays();
     void listsFolderContent();
     void renamesAndMoves();
@@ -108,6 +109,10 @@ void KioWorkerTest::initTestCase()
     // Also keeps the worker's spool, caches and logs in the test folder.
     m_kationd = std::make_unique<FakeKationd>(m_home);
     QVERIFY(m_kationd->start());
+    // kationd made it private as it started: check that the worker does too.
+    QVERIFY(QFile::setPermissions(m_home.filePath(u"cache/kation"_s),
+                                  QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+                                      | QFileDevice::ReadOther | QFileDevice::ExeOther));
 
     m_drive = new KationDriveInterface(Kation::serviceName, Kation::objectPath, QDBusConnection::sessionBus(), this);
 }
@@ -182,6 +187,18 @@ void KioWorkerTest::putsAndGetsFiles()
     KIO::StoredTransferJob *folder = KIO::storedGet(driveUrl(u"/Docs"_s), KIO::NoReload, KIO::HideProgressInfo);
     QVERIFY(!folder->exec());
     QCOMPARE(folder->error(), int(KIO::ERR_IS_DIRECTORY));
+}
+
+void KioWorkerTest::keepsItsCacheFolderPrivate()
+{
+    const auto ownerOnly = QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner;
+    const auto others =
+        QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther;
+    for (const QString &folder : {u"cache/kation"_s, u"cache/kation/spool"_s}) {
+        const QFileDevice::Permissions permissions = QFile::permissions(m_home.filePath(folder));
+        QVERIFY2((permissions & ownerOnly) == ownerOnly, qPrintable(folder));
+        QVERIFY2(!(permissions & others), qPrintable(folder));
+    }
 }
 
 void KioWorkerTest::copiesLocalFilesBothWays()

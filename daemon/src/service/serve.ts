@@ -11,6 +11,7 @@ import dbus from 'dbus-next';
 
 import { type Config, CredentialsStoreType } from '../config';
 import { openDrive } from '../drive';
+import { clearAfterSignOut, privateDirsOf, securePrivateDirs } from '../privateDirs';
 import { Autostart } from '../sync/autostart';
 import { SyncController } from '../sync/controller';
 import { initTelemetry } from '../telemetry';
@@ -44,7 +45,7 @@ type Backend = {
 export async function serve(options: ServeOptions): Promise<void> {
     let onEvent: (event: DriveEvent) => void = () => {};
     const backend = options.fakeDrive
-        ? createFakeBackend(options.config, (event) => onEvent(event))
+        ? await createFakeBackend(options.config, (event) => onEvent(event))
         : await createProtonBackend(options.config, (event) => onEvent(event));
     const { logger } = backend;
 
@@ -92,9 +93,12 @@ export async function serve(options: ServeOptions): Promise<void> {
                 await sync.apply().catch((error: unknown) => logger.error('Failed to start sync', error));
             },
             afterLogout: async () => {
-                await sync.onLogout();
-                tree.clear();
-                await backend.clearLocalData();
+                try {
+                    await sync.onLogout();
+                    tree.clear();
+                } finally {
+                    await backend.clearLocalData();
+                }
             },
             sessionLost: async () => {
                 // Keep the sync state and event cursors: signing in again to the same account resumes where it stopped.
@@ -180,15 +184,19 @@ async function createProtonBackend(config: Config, onEvent: (event: DriveEvent) 
             drive.events.addScope(root.treeEventScopeId);
         },
         stopEvents: () => drive.events.stop(),
-        // signOut (via logout) already clears the SDK caches and event cursors.
-        clearLocalData: async () => {},
+        // signOut (via logout) already cleared the SDK caches and event cursors.
+        clearLocalData: () => drive.clearLocalData(),
         dispose: () => drive.dispose(),
     };
 }
 
-function createFakeBackend(config: Config, onEvent: (event: DriveEvent) => void): Backend {
-    const { telemetry, flush } = initTelemetry(config);
+async function createFakeBackend(config: Config, onEvent: (event: DriveEvent) => void): Promise<Backend> {
+    const warnings = await securePrivateDirs(privateDirsOf(config));
+    const { telemetry, flush, clearLog } = initTelemetry(config);
     const logger = telemetry.getLogger('kationd');
+    for (const warning of warnings) {
+        logger.warn(warning);
+    }
     logger.warn('Serving a fake in-memory drive (--fake-drive). No data reaches Proton.');
     const fake = new FakeDrive({ chunkDelayMs: Number(process.env.KATION_FAKE_CHUNK_DELAY_MS) || 0, onEvent });
     return {
@@ -206,7 +214,7 @@ function createFakeBackend(config: Config, onEvent: (event: DriveEvent) => void)
         account: new FakeAccount(process.env.KATION_FAKE_LOGGED_IN !== '0', Number(process.env.KATION_FAKE_LOGIN_DELAY_MS) || 1000),
         startEvents: async () => {},
         stopEvents: async () => {},
-        clearLocalData: async () => {},
+        clearLocalData: () => clearAfterSignOut(config.cacheDir, clearLog, logger),
         dispose: flush,
     };
 }
