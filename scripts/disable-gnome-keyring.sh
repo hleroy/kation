@@ -113,17 +113,16 @@ pam_files() {
 
 # Prints "<keyring line> <jump line> <ours> <actions>" for each keyring line a
 # jump skips: a "[...=N]" control skips the next N module lines of its type.
-# Comments and @include lines are not modules; include/substack lines are.
+# Comments and @include lines are not modules; include/substack lines count as one
+# (include really inlines its file: jumps through it are not followed).
 # Lines this script commented out count as before (ours=1): their jump counted them.
+# A keyring line with a jump of its own is reported as "self".
 pam_jumps() {
     KEYRING="^$PAM_LINE" MARK="$MARK" awk '
     function check(line, start,    ours, type, rest, control, item, kv, pos, j, i, n, reach) {
         ours = 0
         if (index(line, ENVIRON["MARK"]) == 1) {
             line = substr(line, length(ENVIRON["MARK"]) + 1)
-            ours = 1
-        } else if (line ~ /^#-/ && tolower(substr(line, 2)) ~ ENVIRON["KEYRING"]) {
-            line = substr(line, 2)
             ours = 1
         }
         sub(/^[[:space:]]+/, "", line)
@@ -152,6 +151,7 @@ pam_jumps() {
             }
         }
         if ((type == "auth" || type == "session") && tolower(line) ~ ENVIRON["KEYRING"]) {
+            if (actions[type, pos] > 0) print start, start, ours, "self"
             for (j = 1; j < pos; j++) {
                 reach = ""
                 for (i = 1; i <= actions[type, j]; i++) {
@@ -171,8 +171,10 @@ pam_jumps() {
         } else {
             buffer = buffer " " $0
         }
-        # A line ending in "\" continues on the next one (not in a comment, which ends it).
-        if (buffer !~ /^[[:space:]]*#/ && buffer ~ /\\$/) {
+        # A line ending in "\" continues on the next one; a comment ends the line first.
+        code = buffer
+        sub(/#.*/, "", code)
+        if (code ~ /\\$/) {
             sub(/\\$/, "", buffer)
             next
         }
@@ -188,14 +190,20 @@ pam_jumps() {
 report_jumps() {
     local f=$1 keyring_line jump_line ours reach
     while read -r keyring_line jump_line ours reach; do
-        if [[ $ours == 1 ]]; then
-            info "WARNING: $f, line $keyring_line (pam_gnome_keyring) was commented out by an earlier"
-            info "  version of this script, but the jump on line $jump_line counted it, so that jump now"
-            info "  lands one module further. Run this script with --undo, then again."
+        if [[ $reach == self ]]; then
+            info "LEFT UNCHANGED: $f, line $keyring_line (pam_gnome_keyring) has a jump of its own:"
+            info "  commenting it out would change where the stack goes. Edit it by hand."
+        elif [[ $ours == 1 ]]; then
+            info "WARNING: $f, line $keyring_line (pam_gnome_keyring) was commented out by an earlier version"
+            info "  of this script, but the jump on line $jump_line counts it: that jump now lands one module further."
+            info "  To fix it: lower ${reach//,/ and } in line $jump_line by one (write \"ignore\" for a value that"
+            info "  becomes 0), unless you already did. Then replace \"$MARK\" at the start of line"
+            info "  $keyring_line with \"# \", so that --undo leaves that line alone."
         else
             info "LEFT UNCHANGED: $f, line $keyring_line (pam_gnome_keyring) is skipped by the jump on line $jump_line."
-            info "  To disable it by hand: comment out line $keyring_line, lower ${reach//,/ and } in line $jump_line"
-            info "  by one (write \"ignore\" for a value that becomes 0), then run this script again."
+            info "  To disable it by hand: delete line $keyring_line, or comment it out with \"# \" (a hash and a"
+            info "  space), and lower ${reach//,/ and } in line $jump_line by one for each line you remove from"
+            info "  its range (write \"ignore\" for a value that becomes 0). Then run this script again."
         fi
     done <<<"$2"
     if [[ "${f%/*}" != "$PAM_DIR" ]]; then
@@ -259,7 +267,7 @@ disable_pam() {
     local f target changed=0
     local jumps
     while IFS= read -r f; do
-        grep -Eq "$PAM_ACTIVE|$PAM_OURS|$PAM_LEGACY" "$f" || continue
+        grep -Eq "$PAM_ACTIVE|$PAM_OURS" "$f" || continue
         jumps=$(pam_jumps "$f")
         if [[ -n "$jumps" ]]; then
             # Commenting out such a line would make the jump land one module further.

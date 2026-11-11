@@ -67,7 +67,7 @@ auth required pam_permit.so
 '
 dir=$(fixture jump common-auth "$jump")
 run "$dir"
-[[ $STATUS -ne 0 ]] || fail "jump: exit status 0"
+[[ $STATUS -eq 3 ]] || fail "jump: exit status $STATUS"
 same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "jump: file changed"
 [[ ! -e "$dir/pam.d/common-auth.bak" ]] || fail "jump: backup made of a file left alone"
 [[ $OUTPUT == *"$dir/pam.d/common-auth, line 2"*"jump on line 1"*"success=1"* ]] || fail "jump: no warning naming the file and lines: $OUTPUT"
@@ -96,7 +96,7 @@ disabled "$dir/pam.d/common-auth" 'auth optional pam_gnome_keyring.so' || fail "
 dir=$(fixture mixed common-auth "$jump")
 printf 'auth optional pam_gnome_keyring.so\n' >"$dir/pam.d/login"
 run "$dir"
-[[ $STATUS -ne 0 ]] || fail "mixed: exit status 0"
+[[ $STATUS -eq 3 ]] || fail "mixed: exit status $STATUS"
 same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "mixed: file with the jump changed"
 disabled "$dir/pam.d/login" 'auth optional pam_gnome_keyring.so' || fail "mixed: the other file was not handled"
 
@@ -108,7 +108,7 @@ auth requisite pam_deny.so
 auth required pam_permit.so
 ')
 run "$dir"
-[[ $STATUS -ne 0 ]] || fail "two jumps: exit status 0"
+[[ $STATUS -eq 3 ]] || fail "two jumps: exit status $STATUS"
 same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "two jumps: file changed"
 [[ $OUTPUT == *"jump on line 1"*"jump on line 2"* ]] || fail "two jumps: both jumps not reported: $OUTPUT"
 
@@ -119,16 +119,24 @@ auth optional /usr/lib/security/pam_gnome_keyring.so debug
 auth requisite pam_deny.so
 ')
 run "$dir"
-[[ $STATUS -ne 0 ]] || fail "syntax: exit status 0: $OUTPUT"
+[[ $STATUS -eq 3 ]] || fail "syntax: exit status $STATUS: $OUTPUT"
 same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "syntax: file changed"
 
-# 8. A keyring line with a control in brackets is never commented out: no jump of its own is lost.
-dir=$(fixture own-jump common-auth 'auth [success=1 default=ignore] pam_gnome_keyring.so
+# 8. A keyring line with a jump of its own: left alone (with one item in brackets, the
+# script's pattern matches it), or never matched at all (several items).
+dir=$(fixture own-jump common-auth 'auth [success=1] pam_gnome_keyring.so
 auth requisite pam_deny.so
 auth required pam_permit.so
 ')
 run "$dir"
+[[ $STATUS -eq 3 ]] || fail "own jump: exit status $STATUS"
 same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "own jump: file changed"
+dir=$(fixture own-jump-items common-auth 'auth [success=1 default=ignore] pam_gnome_keyring.so
+auth requisite pam_deny.so
+auth required pam_permit.so
+')
+run "$dir"
+same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "own jump, several items: file changed"
 
 # 9. A keyring line an earlier version commented out inside a jump: a warning pointing to --undo.
 dir=$(fixture earlier common-auth 'auth [success=2 default=ignore] pam_unix.so nullok
@@ -137,17 +145,49 @@ auth requisite pam_deny.so
 auth required pam_permit.so
 ')
 run "$dir"
-[[ $STATUS -ne 0 ]] || fail "earlier: exit status 0"
-[[ $OUTPUT == *"earlier"*"--undo"* ]] || fail "earlier: no warning: $OUTPUT"
+[[ $STATUS -eq 3 ]] || fail "earlier: exit status $STATUS"
+[[ $OUTPUT == *"earlier version"*"lower success=2 in line 1"*'with "# "'* ]] || fail "earlier: no warning: $OUTPUT"
 
 # 10. A vendor file with a jump: no copy is made in PAM_DIR.
 dir=$(fixture vendor unused '')
 mkdir -p "$dir/vendor"
 printf '%s' "$jump" >"$dir/vendor/common-auth"
 run "$dir"
-[[ $STATUS -ne 0 ]] || fail "vendor: exit status 0"
+[[ $STATUS -eq 3 ]] || fail "vendor: exit status $STATUS"
 [[ ! -e "$dir/pam.d/common-auth" ]] || fail "vendor: copied to PAM_DIR"
 [[ $OUTPUT == *"vendor file"* ]] || fail "vendor: no note about vendor files: $OUTPUT"
+
+# 11. The hand fix as the script words it, for a "-auth" line: no warning when run again,
+# and --undo leaves the commented line (and so the lowered jump) alone.
+dir=$(fixture hand-fixed common-auth 'auth [success=1 default=ignore] pam_unix.so nullok
+# -auth optional pam_gnome_keyring.so
+auth requisite pam_deny.so
+auth required pam_permit.so
+')
+run "$dir"
+[[ $STATUS -eq 0 ]] || fail "hand fixed: exit status $STATUS: $OUTPUT"
+run "$dir" --undo
+same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "hand fixed: --undo changed the file"
+
+# 12. A "#-auth" line is not taken for one this script commented out.
+dir=$(fixture legacy common-auth 'auth [success=1 default=ignore] pam_unix.so nullok
+#-auth optional pam_gnome_keyring.so
+auth requisite pam_deny.so
+auth required pam_permit.so
+')
+run "$dir"
+[[ $STATUS -eq 0 ]] || fail "legacy: exit status $STATUS: $OUTPUT"
+same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "legacy: file changed"
+
+# 13. A backslash in a trailing comment does not continue the line.
+dir=$(fixture comment common-auth 'auth [success=2 default=ignore] pam_unix.so nullok # see bug \
+auth optional pam_gnome_keyring.so
+auth requisite pam_deny.so
+auth required pam_permit.so
+')
+run "$dir"
+[[ $STATUS -eq 3 ]] || fail "comment: exit status $STATUS: $OUTPUT"
+same "$dir/pam.d/common-auth" "$dir/original-common-auth" || fail "comment: file changed"
 
 if [[ $FAILURES -gt 0 ]]; then
     echo "$FAILURES check(s) failed" >&2
