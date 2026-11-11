@@ -25,7 +25,7 @@ export type TransferOptions = {
      * Downloads only: keep the partial file when interrupted (as a hidden
      * file next to the destination) and continue from it next time. Used by
      * sync. A resumed download skips the SDK's block and manifest checks: it is
-     * checked against the size and SHA-1 in the file's encrypted attributes instead.
+     * checked against the size and SHA-1 in the file's signed attributes instead.
      */
     resumable?: boolean;
     /**
@@ -43,7 +43,9 @@ const OCTET_STREAM = 'application/octet-stream';
 
 // O_NOFOLLOW and O_EXCL: a link planted at a partial file's name is never written through.
 const NEW_PART_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
-const APPEND_PART_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW;
+// O_NONBLOCK: a FIFO swapped in for a partial file fails to open instead of blocking.
+const APPEND_PART_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+const READ_PART_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 export class DriveService {
     /** Speed limits shared by all transfers (sync and online view), set from the settings. */
@@ -156,8 +158,10 @@ export class DriveService {
         const revision = node.activeRevision;
         const expectedSha1 = revision?.claimedDigests?.sha1;
         const claimedSize = revision?.claimedSize;
-        // The seekable stream skips the SDK's checks: resuming needs a size and checksum to verify the result.
-        const resumable = !!options.resumable && !!expectedSha1 && claimedSize !== undefined && !!revision?.uid;
+        // The seekable stream skips the SDK's checks: resuming needs a size and checksum, from
+        // attributes whose signature verified, to check the result against.
+        const resumable =
+            !!options.resumable && !!expectedSha1 && claimedSize !== undefined && !!revision?.uid && revision.contentAuthor.ok;
         const partPath = resumable ? resumablePartPath(localPath, revision!.uid) : `${localPath}.kation-part`;
 
         if (resumable) {
@@ -261,7 +265,13 @@ export class DriveService {
             await unlink(partPath).catch(() => {});
             return false;
         }
-        if ((await sha1Of(partPath, options.signal)) !== expectedSha1) {
+        const sha1 = await sha1OfPart(partPath, options.signal).catch((error: unknown) => {
+            if (options.signal?.aborted) {
+                throw error;
+            }
+            return undefined;
+        });
+        if (sha1 !== expectedSha1) {
             this.logger.warn(`Resumed download of ${node.uid} failed the checksum, downloading it again`);
             await unlink(partPath).catch(() => {});
             return false;
@@ -439,6 +449,28 @@ async function createPartFile(partPath: string) {
             throw new KationError('Failed', `Something else created ${partPath} during the download`, { cause: error });
         }
         throw error;
+    }
+}
+
+/** SHA-1 of a partial file, without following a link or blocking on a FIFO swapped in for it. */
+async function sha1OfPart(partPath: string, signal?: AbortSignal): Promise<string> {
+    const handle = await open(partPath, READ_PART_FLAGS);
+    try {
+        if (!(await handle.stat()).isFile()) {
+            throw new Error('The partial file was replaced');
+        }
+        const hash = createHash('sha1');
+        const buffer = Buffer.alloc(RESUME_CHUNK_SIZE);
+        while (true) {
+            signal?.throwIfAborted();
+            const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+            if (bytesRead === 0) {
+                return hash.digest('hex');
+            }
+            hash.update(buffer.subarray(0, bytesRead));
+        }
+    } finally {
+        await handle.close();
     }
 }
 

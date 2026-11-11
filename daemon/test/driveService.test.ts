@@ -277,6 +277,21 @@ describe('resumable downloads', () => {
         expect(await readFile(local, 'utf8')).toBe('x'.repeat(1000));
     });
 
+    it('does not resume when the signature of the file attributes does not verify', async () => {
+        const { fake, drive } = setup();
+        const file = fake.add({ parentUid: fake.rootUid, name: 'f.bin', type: NodeType.File, content: 'x'.repeat(1000) });
+        const node = await fake.sdk.getNode(file.uid);
+        const dir = await tempDir();
+        const local = path.join(dir, 'f.bin');
+        await writeFile(resumablePartPath(local, node.activeRevision!.uid), 'x'.repeat(10));
+
+        fake.bytesServed = 0;
+        const unsigned = { ...node.activeRevision!, contentAuthor: { ok: false as const, error: { claimedAuthor: 'a@b', error: 'bad' } } };
+        await drive.downloadNode({ ...node, activeRevision: unsigned }, local, { resumable: true });
+        expect(fake.bytesServed).toBe(1000);
+        expect(await readFile(local, 'utf8')).toBe('x'.repeat(1000));
+    });
+
     it('does not resume a partial file of an older version', async () => {
         const { fake, drive } = setup();
         const file = fake.add({ parentUid: fake.rootUid, name: 'f.txt', type: NodeType.File, content: 'version one' });

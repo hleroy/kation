@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `protondrive:/` takes a file's type from its name, so a file such as `photo.jpg` no longer opens in the application for whatever type its uploader claimed (a Java archive, for example). A file whose name gives no type keeps its stored type only when that is plain text, Markdown or CSV; other such files show as unknown and open with "Open With".
 - Downloads never write through a symbolic or hard link planted at the name of their partial file (`.kation-part`).
 - Sync moves items to the trash of another disk only when its `.Trash-<uid>` folder is a private folder of the user's, not a link or a folder others can write to.
-- Sync checks the whole path of the sync folder for symbolic links again just before each write, so a folder swapped for a link during a sync pass is no longer written through.
-- A resumed download is discarded and downloaded again in full unless its size matches the one in the file's encrypted attributes, as well as its SHA-1.
+- Sync checks the whole path of an item for symbolic links again just before writing it, not only when it starts on its folder, which narrows the time in which a folder swapped for a link is written through.
+- A download is resumed only when the file's attributes carry a valid signature, and a resumed download is discarded and downloaded again in full unless both its size and SHA-1 match those attributes.
 
 ### Fixed
 
