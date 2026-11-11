@@ -66,15 +66,16 @@ export type SyncControllerOptions = {
 export async function forgetSyncedFiles(
     state: SyncState,
     settings: Pick<SyncSettings, 'folder' | 'excluded'>,
+    logger: Logger,
     unmountedDisk: (folder: string) => Promise<string | undefined> = findUnmountedDisk,
 ): Promise<void> {
     // Not walked on a disk that is not mounted: an automount point would block.
     if (!(await unmountedDisk(settings.folder).catch(() => undefined))) {
         await removeResumableParts(settings.folder, settings.excluded);
     }
-    const rootUid = state.getMeta('rootUid');
-    state.clear();
-    state.setMeta('rootUid', rootUid);
+    if (!state.clear(['rootUid'])) {
+        logger.warn('Could not compact the sync state; deleted entries may stay in its file until the next sign-out');
+    }
 }
 
 export class SyncController {
@@ -253,7 +254,8 @@ export class SyncController {
      */
     async onLogout(): Promise<void> {
         await this.stopEngine();
-        await forgetSyncedFiles(this.state, this.settings, this.options.engineOptions?.unmountedDisk);
+        await forgetSyncedFiles(this.state, this.settings, this.options.logger, this.options.engineOptions?.unmountedDisk);
+        this.recent.length = 0;
         this.notify();
     }
 

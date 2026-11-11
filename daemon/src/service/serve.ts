@@ -93,9 +93,12 @@ export async function serve(options: ServeOptions): Promise<void> {
                 await sync.apply().catch((error: unknown) => logger.error('Failed to start sync', error));
             },
             afterLogout: async () => {
-                await sync.onLogout();
-                tree.clear();
-                await backend.clearLocalData();
+                try {
+                    await sync.onLogout();
+                    tree.clear();
+                } finally {
+                    await backend.clearLocalData();
+                }
             },
             sessionLost: async () => {
                 // Keep the sync state and event cursors: signing in again to the same account resumes where it stopped.

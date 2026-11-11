@@ -318,7 +318,7 @@ const LOCAL_COMMANDS: Record<string, Handler> = {
         if (existsSync(stateFile)) {
             const state = new SyncState(stateFile);
             try {
-                await forgetSyncedFiles(state, new SettingsStore(drive.config.configDir, drive.config.homeDir).load());
+                await forgetSyncedFiles(state, new SettingsStore(drive.config.configDir, drive.config.homeDir).load(), drive.logger);
             } finally {
                 state.close();
             }

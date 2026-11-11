@@ -241,7 +241,12 @@ describe('SyncState', () => {
                 remoteSha1: 's',
             });
         }
-        state.clear();
+        state.setMeta('rootUid', 'root-1');
+        state.setMeta('lastSync', '123');
+        expect(state.clear(['rootUid'])).toBe(true);
+        expect(state.getMeta('rootUid')).toBe('root-1');
+        expect(state.getMeta('lastSync')).toBeUndefined();
+        expect(state.count()).toBe(0);
         for (const name of [file, `${file}-wal`]) {
             const bytes = Buffer.from(await readFile(name).catch(() => Buffer.alloc(0)));
             expect(bytes.includes('tax-return-2026')).toBe(false);

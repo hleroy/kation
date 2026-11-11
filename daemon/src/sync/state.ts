@@ -156,12 +156,25 @@ export class SyncState {
             .map((row) => row.path);
     }
 
-    clear(): void {
-        this.db.run('DELETE FROM entries');
-        this.db.run('DELETE FROM meta');
-        this.db.run('DELETE FROM pending');
-        this.db.run('VACUUM');
-        this.db.run('PRAGMA wal_checkpoint(TRUNCATE)');
+    /**
+     * Deletes everything but the metadata keys in `keep`, then compacts the files
+     * so no deleted row stays in them. Returns false if compacting failed (for
+     * example on a full disk); the deletion itself is done either way.
+     */
+    clear(keep: string[] = []): boolean {
+        this.db.transaction(() => {
+            this.db.run('DELETE FROM entries');
+            this.db.run('DELETE FROM pending');
+            const placeholders = keep.map(() => '?').join(', ');
+            this.db.query(`DELETE FROM meta WHERE key NOT IN (${placeholders})`).run(...keep);
+        })();
+        try {
+            this.db.run('VACUUM');
+            this.db.run('PRAGMA wal_checkpoint(TRUNCATE)');
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     close(): void {

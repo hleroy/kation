@@ -65,6 +65,12 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
     const sdk = new ProtonDriveClient(sdkDependencies);
     // Started by `kationd serve` while signed in; other commands do not poll.
     const events = new EventPoller(logger, sdk, eventsProvider, options.onEvent);
+    // Again: on a first start, the code copied from the Proton CLI just created files with the umask's mode.
+    for (const warning of await securePrivateDirs(privateDirsOf(config))) {
+        if (!warnings.includes(warning)) {
+            logger.warn(warning);
+        }
+    }
 
     return {
         config,
