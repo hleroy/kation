@@ -24,7 +24,7 @@ import { type DriveEvent, DriveEventType, type Logger, type NodeEntity } from '@
 
 import type { DriveService } from '../service/driveService';
 import { MAX_NAME_BYTES, sha1Of } from '../service/driveService';
-import { isFolder, nodeName } from '../service/entry';
+import { isFolder, isUsableName, nodeName } from '../service/entry';
 import { KationError, toKationError } from '../service/errors';
 import type { DriveSdk } from '../service/sdk';
 import type { DriveTree } from '../service/tree';
@@ -779,6 +779,11 @@ export class SyncEngine {
             if (!node.name.ok) {
                 const tooLong = tooLongName(node.name.error);
                 if (tooLong !== undefined && !this.options.state.byRemoteUid(node.uid)) {
+                    if (!isUsableName(tooLong)) {
+                        // As DriveTree does for such names: not even reported, it could not be a path here.
+                        this.logger.warn(`Skipping ${node.uid} in ${context.path}: its name cannot be used as a file name`);
+                        continue;
+                    }
                     // Never synced: kept under its name, which reconcileFolder skips as too long.
                     items.set(tooLong, { ...remoteItemFromNode(node), name: tooLong });
                     continue;

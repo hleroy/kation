@@ -1065,6 +1065,25 @@ describe('SyncEngine', () => {
             expect((await readdir(ctx.root)).sort()).toEqual(['.kation-sync', 'normal.txt']);
         });
 
+        it('leaves out, without reporting, a refused name that could not be a file name', async () => {
+            const activity: string[] = [];
+            const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`) });
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: `${'a'.repeat(300)}\0x`, type: NodeType.File, content: 'nul' });
+            ctx.fake.add({
+                parentUid: ctx.fake.rootUid,
+                name: `${'a'.repeat(300)}/../../etc/passwd`,
+                type: NodeType.File,
+                content: 'slash',
+            });
+            ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'ok.txt', type: NodeType.File, content: 'ok' });
+            await ctx.engine.start();
+            await ctx.settle();
+
+            expect(await readFile(ctx.local('ok.txt'), 'utf8')).toBe('ok');
+            expect(ctx.engine.getStatus().state).toBe('idle');
+            expect(activity.filter((line) => !line.startsWith('downloaded'))).toEqual([]);
+        });
+
         it('skips a name the SDK accepts but that is too long in bytes', async () => {
             const activity: string[] = [];
             const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`) });
