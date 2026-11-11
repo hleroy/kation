@@ -148,6 +148,9 @@ void TrayTest::escapesFileNamesInTheTooltip()
 
     const QString name = u"<b>x<br>y.txt"_s;
     write(local(name), QByteArray(512 * 1024, 'x'));
+    // Escaped, a name with only "&" holds no tag: the tooltip must still be read as rich text.
+    const QString ampersand = u"Tom & Jerry.txt"_s;
+    write(local(ampersand), QByteArray(512 * 1024, 'x'));
     KationDriveInterface drive(Kation::serviceName, Kation::objectPath, QDBusConnection::sessionBus());
     drive.SetSyncEnabled(true).waitForFinished();
     QTRY_VERIFY_WITH_TIMEOUT(m_tray->statusText().contains(name), 10000);
@@ -158,10 +161,21 @@ void TrayTest::escapesFileNamesInTheTooltip()
     QVERIFY(!item->toolTipSubTitle().contains(name));
     QVERIFY(m_tray->menu()->actions().first()->text().contains(name));
 
+    QTRY_VERIFY_WITH_TIMEOUT(m_tray->statusText().contains(ampersand), 20000);
+    QVERIFY2(Qt::mightBeRichText(item->toolTipSubTitle()) && item->toolTipSubTitle().contains(u"Tom &amp; Jerry.txt"_s), qPrintable(item->toolTipSubTitle()));
+
     // The activity menu's tooltips show the path as text too.
     auto activity = m_tray->menu()->findChild<QMenu *>(u"activity"_s);
-    QTRY_VERIFY_WITH_TIMEOUT(!activity->actions().isEmpty() && activity->actions().first()->text().contains(name), 20000);
-    const QString tip = activity->actions().first()->toolTip();
+    const auto activityFor = [activity, &name]() -> QAction * {
+        for (QAction *action : activity->actions()) {
+            if (action->text().contains(name)) {
+                return action;
+            }
+        }
+        return nullptr;
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(activityFor(), 20000);
+    const QString tip = activityFor()->toolTip();
     QVERIFY2(Qt::mightBeRichText(tip) && tip.contains(u"&lt;b&gt;x&lt;br&gt;y.txt"_s), qPrintable(tip));
 
     drive.SetSyncEnabled(false).waitForFinished();

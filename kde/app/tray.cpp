@@ -359,8 +359,8 @@ void KationTray::update()
     // Shown instead of the icon while the status needs attention.
     m_item->setAttentionIconByName(icon);
     m_item->setStatus(itemStatus);
-    // The tooltip is rich text; the status holds file names and kationd's messages.
-    m_item->setToolTip(icon, i18n("Kation"), statusText().toHtmlEscaped());
+    // Plasma guesses the tooltip's format; the status holds file names and kationd's messages.
+    m_item->setToolTip(icon, i18n("Kation"), Qt::convertFromPlainText(statusText(), Qt::WhiteSpaceNormal));
 
     m_statusAction->setText(statusText());
     m_signIn->setVisible(m_reachable && !loggedIn);

@@ -210,6 +210,15 @@ void DolphinPluginsTest::offersLinksForProtonItems()
     QTRY_VERIFY_WITH_TIMEOUT(!question.isEmpty(), 5000);
     QVERIFY2(question.contains(u"“&lt;b&gt;x&lt;br&gt;y.txt”"_s), qPrintable(question));
     QVERIFY(Qt::mightBeRichText(question));
+    // Spaces stay spaces, so the text wraps between words.
+    QVERIFY(!question.contains(QChar(0x00A0)));
+
+    // kationd's errors name the item: no tag forms in them.
+    QSignalSpy errors(plugin, &KAbstractFileItemActionPlugin::error);
+    actionsFor(QUrl(u"protondrive:/<b>missing.txt"_s)).first()->menu()->actions().at(1)->trigger();
+    QTRY_VERIFY(!errors.isEmpty());
+    const QString message = errors.first().at(0).toString();
+    QVERIFY2(message.contains(u"&lt;b>missing.txt"_s) && !message.contains(u"<b>"_s), qPrintable(message));
 }
 
 void DolphinPluginsTest::menuBuilderPicksThePlugin()

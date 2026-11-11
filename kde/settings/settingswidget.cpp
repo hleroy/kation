@@ -146,6 +146,8 @@ void KationSettingsWidget::buildGeneralTab(QWidget *tab)
     m_syncBox->setObjectName(QStringLiteral("syncBox"));
     m_syncFolder->setObjectName(QStringLiteral("syncFolder"));
     m_syncState->setObjectName(QStringLiteral("syncState"));
+    // Its texts are escaped HTML, which may hold no tag (a name with "&").
+    m_syncState->setTextFormat(Qt::RichText);
     m_syncToggle->setObjectName(QStringLiteral("syncToggle"));
     m_syncPause->setObjectName(QStringLiteral("syncPause"));
     m_syncChooseFolder->setObjectName(QStringLiteral("syncChooseFolder"));

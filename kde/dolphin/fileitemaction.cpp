@@ -64,7 +64,7 @@ public:
                 watcher->deleteLater();
                 QDBusPendingReply<QString> reply = *watcher;
                 if (reply.isError()) {
-                    Q_EMIT error(reply.error().message());
+                    Q_EMIT error(withoutMarkup(reply.error().message()));
                     return;
                 }
                 if (!Kation::openWebUrl(reply.value())) {
@@ -76,6 +76,12 @@ public:
     }
 
 private:
+    /// kationd's errors can hold a file name, and Dolphin guesses their format: no tag may form.
+    static QString withoutMarkup(const QString &message)
+    {
+        return QString(message).replace(QLatin1Char('<'), QLatin1String("&lt;"));
+    }
+
     KationDriveInterface *drive()
     {
         if (!m_drive) {
@@ -112,19 +118,20 @@ private:
             watcher->deleteLater();
             QDBusPendingReply<QString> reply = *watcher;
             if (reply.isError()) {
-                Q_EMIT error(reply.error().message());
+                Q_EMIT error(withoutMarkup(reply.error().message()));
                 return;
             }
             if (!reply.value().isEmpty()) {
                 linkCopied(reply.value(), name, false);
                 return;
             }
-            // As rich text, with the name escaped: the box would read a name with markup as rich text.
+            // As rich text, with the name escaped: the box guesses the format, and would read a name with markup as rich text.
             const auto answer = QMessageBox::question(parent,
                                                       i18n("Create a Public Link?"),
                                                       Qt::convertFromPlainText(i18n("“%1” has no public link yet. Anyone who has the link will be able to "
                                                                                     "view it. You can remove the link in the Proton Drive website.",
-                                                                                    name)),
+                                                                                    name),
+                                                                               Qt::WhiteSpaceNormal),
                                                       QMessageBox::Yes | QMessageBox::Cancel,
                                                       QMessageBox::Cancel);
             if (answer != QMessageBox::Yes) {
@@ -135,7 +142,7 @@ private:
                 create->deleteLater();
                 QDBusPendingReply<QString> created = *create;
                 if (created.isError()) {
-                    Q_EMIT error(created.error().message());
+                    Q_EMIT error(withoutMarkup(created.error().message()));
                     return;
                 }
                 linkCopied(created.value(), name, true);
