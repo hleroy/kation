@@ -106,10 +106,13 @@ describe('SyncController', () => {
         fake.add({ parentUid: fake.rootUid, name: 'kept.txt', type: NodeType.File, content: 'k' });
         await controller.setEnabled(true);
         await Bun.sleep(50);
+        const part = path.join(home, 'Proton Drive', '.big.iso.0123abcd.kation-part');
+        await writeFile(part, 'partial');
         state.loggedIn = false;
         await controller.onLogout();
         expect(controller.status()).toMatchObject({ enabled: true, state: 'disabled', message: 'Sign in to sync', reason: 'signedOut' });
         expect(await readFile(path.join(home, 'Proton Drive', 'kept.txt'), 'utf8')).toBe('k');
+        expect(await Bun.file(part).exists()).toBe(false);
     });
 
     it('pauses after signing in to another account, and starts over when turned off and on', async () => {

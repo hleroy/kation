@@ -22,6 +22,8 @@ import {
     SyncEngine,
     type SyncStatus,
 } from './engine';
+import { removeResumableParts } from './local';
+import { findUnmountedDisk } from './mounts';
 import { normalizeExcluded, SettingsStore, type SyncSettings, validateFolder, validateLimit } from './settings';
 import { parentOf, SyncState } from './state';
 
@@ -55,6 +57,25 @@ export type SyncControllerOptions = {
     /** Overrides for tests. */
     engineOptions?: Partial<ConstructorParameters<typeof SyncEngine>[0]>;
 };
+
+/**
+ * On sign-out: deletes the partial downloads in the sync folder and the sync
+ * state, except the account the folder was synced with (see SAFETY_PAUSE_META).
+ * The synced files stay.
+ */
+export async function forgetSyncedFiles(
+    state: SyncState,
+    settings: Pick<SyncSettings, 'folder' | 'excluded'>,
+    unmountedDisk: (folder: string) => Promise<string | undefined> = findUnmountedDisk,
+): Promise<void> {
+    // Not walked on a disk that is not mounted: an automount point would block.
+    if (!(await unmountedDisk(settings.folder).catch(() => undefined))) {
+        await removeResumableParts(settings.folder, settings.excluded);
+    }
+    const rootUid = state.getMeta('rootUid');
+    state.clear();
+    state.setMeta('rootUid', rootUid);
+}
 
 export class SyncController {
     private readonly settingsStore: SettingsStore;
@@ -232,9 +253,7 @@ export class SyncController {
      */
     async onLogout(): Promise<void> {
         await this.stopEngine();
-        const rootUid = this.state.getMeta('rootUid');
-        this.state.clear();
-        this.state.setMeta('rootUid', rootUid);
+        await forgetSyncedFiles(this.state, this.settings, this.options.engineOptions?.unmountedDisk);
         this.notify();
     }
 

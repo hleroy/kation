@@ -98,6 +98,9 @@ Add `--json` for machine-readable output and `--verbose` to see logs.
 | Tray settings | `~/.config/kationrc`; autostart entry `~/.config/autostart/com.hleroy.Kation.tray.desktop` |
 | Logs | `~/.local/state/kation/kationd.log` |
 
+Signing out deletes the session, the caches, the sync state, the log and
+partial downloads. The files in the sync folder and the settings stay.
+
 Logs stay on your computer; Kation sends no telemetry.
 
 Environment variables for `kationd`:

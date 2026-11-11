@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { mkdirSync } from 'node:fs';
+import { readdir, rm, truncate } from 'node:fs/promises';
+import path from 'node:path';
 
 import {
     ConsoleLogHandler,
@@ -40,6 +42,17 @@ export function initTelemetry(config: Config) {
     return {
         telemetry,
         flush: () => fileHandler.flush(),
+        /** Deletes the rotated logs and empties the current one, which stays open. */
+        clearLog: async () => {
+            await fileHandler.flush();
+            for (const name of await readdir(config.logDir).catch(() => [] as string[])) {
+                if (/^kationd\.log\.\d+$/.test(name)) {
+                    await rm(path.join(config.logDir, name), { force: true });
+                }
+            }
+            // The handler appends: later lines start at the beginning again.
+            await truncate(path.join(config.logDir, 'kationd.log'), 0).catch(() => {});
+        },
     };
 }
 

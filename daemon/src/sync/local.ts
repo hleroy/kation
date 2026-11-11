@@ -3,7 +3,7 @@
 
 /** Local side of sync: folder scans, ignored names and the desktop trash. */
 import type { Dirent } from 'node:fs';
-import { lstat, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -90,6 +90,27 @@ export async function isLinkOrSpecial(absolutePath: string): Promise<boolean> {
             return false;
         }
         throw error;
+    }
+}
+
+/** `.<name>.<tag>.kation-part`, see resumablePartPath. */
+const RESUMABLE_PART = /^\..+\.[0-9a-f]{8}\.kation-part$/;
+
+/**
+ * Deletes the resumable partial downloads sync left in a sync folder, except in
+ * excluded folders (paths inside "My files"). Never follows links; anything
+ * unreadable is skipped.
+ */
+export async function removeResumableParts(root: string, excluded: string[], folder = '/'): Promise<void> {
+    const absolute = folder === '/' ? root : path.join(root, folder);
+    const entries = await readdir(absolute, { withFileTypes: true }).catch(() => [] as Dirent[]);
+    for (const entry of entries) {
+        const itemPath = folder === '/' ? `/${entry.name}` : `${folder}/${entry.name}`;
+        if (entry.isFile() && RESUMABLE_PART.test(entry.name)) {
+            await unlink(path.join(absolute, entry.name)).catch(() => {});
+        } else if (entry.isDirectory() && !isIgnoredName(entry.name) && !excluded.includes(itemPath)) {
+            await removeResumableParts(root, excluded, itemPath);
+        }
     }
 }
 

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sync moves items to the trash of another disk only when its `.Trash-<uid>` folder is a private folder of the user's, not a link or a folder others can write to.
 - Sync checks the whole path of an item for symbolic links again just before writing it, not only when it starts on its folder, which narrows the time in which a folder swapped for a link is written through.
 - A download is resumed only when the file's attributes carry a valid signature, and a resumed download is discarded and downloaded again in full unless both its size and SHA-1 match those attributes.
+- kationd's caches, log, sync state and settings are readable by the user only (files `0600` in `0700` folders), and existing ones are tightened at start; the KIO worker no longer creates `~/.cache/kation` readable by others.
+- Signing out also empties the log and deletes the rotated ones, partial downloads in the sync folder, the KIO worker's spool files and the deleted rows left in the sync state's database. The files in the sync folder and the settings stay.
 
 ### Fixed
 
