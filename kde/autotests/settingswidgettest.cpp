@@ -20,6 +20,7 @@
 #include <QCheckBox>
 #include <QDesktopServices>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QLabel>
 #include <QPushButton>
@@ -30,6 +31,15 @@
 #include <QTreeWidget>
 
 using namespace Qt::StringLiterals;
+
+namespace
+{
+QByteArray readFile(const QString &path)
+{
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+}
 
 class SettingsWidgetTest : public QObject
 {
@@ -49,6 +59,7 @@ private Q_SLOTS:
     void foldersLimitsAndStartup();
     void systemSettingsMode();
     void loadsInSystemSettings();
+    void quotesAutostartPrograms();
 
 private:
     QString state() const;
@@ -271,6 +282,17 @@ void SettingsWidgetTest::foldersLimitsAndStartup()
     tray->setChecked(true);
     QTRY_VERIFY(QFileInfo::exists(Kation::trayAutostartPath()));
     QVERIFY(Kation::trayAutostartPath().startsWith(m_home.path()));
+    // The installed program, not a name looked up in PATH; an older entry is rewritten.
+    const QByteArray expectedExec = "\nExec=" + Kation::desktopExecArgument(QStringLiteral(KATION_TRAY_EXECUTABLE)).toUtf8() + " --tray\n";
+    QVERIFY(QByteArray(KATION_TRAY_EXECUTABLE).startsWith('/'));
+    QVERIFY(readFile(Kation::trayAutostartPath()).contains(expectedExec));
+    {
+        QFile old(Kation::trayAutostartPath());
+        QVERIFY(old.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        old.write("[Desktop Entry]\nType=Application\nExec=kation --tray\n");
+    }
+    Kation::applyTrayAutostart();
+    QVERIFY(readFile(Kation::trayAutostartPath()).contains(expectedExec));
     QTRY_VERIFY(!m_window->hasChanges());
     screenshot(u"6-network-startup"_s);
 }
@@ -312,6 +334,15 @@ void SettingsWidgetTest::loadsInSystemSettings()
     QVERIFY(module->widget()->findChild<QTabWidget *>(u"tabs"_s));
     QVERIFY(module->buttons() & KCModule::Apply);
     delete module;
+}
+
+void SettingsWidgetTest::quotesAutostartPrograms()
+{
+    QCOMPARE(Kation::desktopExecArgument(u"/usr/bin/kation"_s), u"/usr/bin/kation"_s);
+    QCOMPARE(Kation::desktopExecArgument(u"/opt/My Apps/kation"_s), u"\"/opt/My Apps/kation\""_s);
+    // Quoting escapes " ` $ \ with a backslash; the value's own escaping then doubles every backslash.
+    QCOMPARE(Kation::desktopExecArgument(u"/opt/a$b\"c`d\\e/kation"_s), u"\"/opt/a\\\\$b\\\\\"c\\\\`d\\\\\\\\e/kation\""_s);
+    QCOMPARE(Kation::desktopExecArgument(u"/opt/100%/kation"_s), u"/opt/100%%/kation"_s);
 }
 
 QTEST_MAIN(SettingsWidgetTest)

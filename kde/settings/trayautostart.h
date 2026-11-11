@@ -13,6 +13,9 @@ bool trayAtLogin();
 void setTrayAtLogin(bool enabled);
 /// Makes the autostart entry match the setting (the tray calls this when it starts).
 void applyTrayAutostart();
+
+/// One argument of a desktop entry's Exec key, quoted and escaped as the Desktop Entry specification says.
+QString desktopExecArgument(const QString &argument);
 /// ~/.config/autostart/com.hleroy.Kation.tray.desktop
 QString trayAutostartPath();
 }

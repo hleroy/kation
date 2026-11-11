@@ -25,7 +25,26 @@ export type AutostartOptions = {
     runtimeDir?: string;
     logger: Logger;
     run?: CommandRunner;
+    /** The program the XDG entry starts (default: runningProgram()). */
+    program?: string;
 };
+
+/**
+ * The absolute path of the running kationd when it is the compiled program, so
+ * the autostart entry does not depend on PATH; "kationd" otherwise (run by Bun
+ * from the sources, where process.execPath is Bun).
+ */
+export function runningProgram(main = Bun.main, execPath = process.execPath): string {
+    // Read from /proc/self/exe: once a package upgrade replaced the file, Linux adds " (deleted)".
+    return main.startsWith('/$bunfs/') ? execPath.replace(/ \(deleted\)$/, '') : 'kationd';
+}
+
+/** One argument of a desktop entry's Exec key, quoted and escaped as the Desktop Entry specification says. */
+export function desktopExecArgument(argument: string): string {
+    const quoted = /[ \t\n"'\\<>~|&;$*?#()`]/.test(argument) ? `"${argument.replace(/["`$\\]/g, (char) => `\\${char}`)}"` : argument;
+    // "%" starts a field code. Then the escaping of every string value, which readers undo first.
+    return quoted.replace(/%/g, '%%').replace(/\\/g, '\\\\').replace(/\n/g, '\\n');
+}
 
 export const runCommand: CommandRunner = async (command) => {
     const proc = Bun.spawn(command, { stdout: 'ignore', stderr: 'pipe' });
@@ -74,7 +93,7 @@ export class Autostart {
                     'Type=Application',
                     'Name=Kation background service',
                     'Comment=Keeps your Proton Drive folder in sync (unofficial client)',
-                    'Exec=kationd serve',
+                    `Exec=${desktopExecArgument(this.options.program ?? runningProgram())} serve`,
                     'NoDisplay=true',
                     'X-KDE-autostart-phase=2',
                     '',
