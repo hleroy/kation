@@ -69,9 +69,9 @@ export type SyncStatus = {
 export type SyncActivity = {
     /** Seconds since the epoch. */
     time: number;
-    kind: 'uploaded' | 'downloaded' | 'trashedRemote' | 'trashedLocal' | 'conflict' | 'error';
+    kind: 'uploaded' | 'downloaded' | 'trashedRemote' | 'trashedLocal' | 'conflict' | 'error' | 'skipped';
     path: string;
-    /** Conflict: the path of the copy kept. Error: the error message. */
+    /** Conflict: the path of the copy kept. Error: the error message. Skipped: why, as a code ("nameTooLong"). */
     detail: string;
 };
 
@@ -153,6 +153,8 @@ type Callbacks = 'onStatus' | 'onActivity' | 'onItemsChanged';
 export const SAFETY_PAUSE_META = 'safetyPause';
 
 const PASS_ABORTING_CODES = new Set(['RateLimited', 'Connection', 'NotLoggedIn', 'Cancelled']);
+/** Longest file name Linux file systems take, in bytes. */
+const MAX_NAME_BYTES = 255;
 const MAX_RETRY_DELAY_MS = 10 * 60 * 1000;
 
 export class SyncEngine {
@@ -175,6 +177,8 @@ export class SyncEngine {
     private freshFolders = new Set<string>();
     /** Items that could not be synced, until they are. */
     private failedItems = new Set<string>();
+    /** Remote items not synced because their name or path is too long here; reported once each. */
+    private skippedItems = new Set<string>();
     /** Items that failed with "not found" once; a second failure is reported as an error. */
     private notFoundRetried = new Set<string>();
     /** An item was skipped in this pass for a link with its name (reason "links"). */
@@ -669,10 +673,18 @@ export class SyncEngine {
 
         await this.checkDeletionCount(folder, base, local, remote);
         const names = [...new Set([...base.keys(), ...local.keys(), ...remote.keys()])].sort();
+        const skipped = new Set<string>();
+        // Only on this side: someone else's item must not keep sync in error (an editor of a shared folder).
+        const remoteOnly = (name: string) => remote.has(name) && !local.has(name) && !base.has(name);
         for (const name of names) {
             this.abort.signal.throwIfAborted();
             const itemPath = childPath(folder, name);
             if (isIgnoredName(name) || this.isExcluded(itemPath)) {
+                continue;
+            }
+            if (remoteOnly(name) && Buffer.byteLength(name) > MAX_NAME_BYTES) {
+                this.skipTooLong(itemPath);
+                skipped.add(itemPath);
                 continue;
             }
             try {
@@ -684,6 +696,12 @@ export class SyncEngine {
                 const kationError = toKationError(error);
                 if (PASS_ABORTING_CODES.has(kationError.code)) {
                     throw kationError;
+                }
+                // A file system with a lower limit (eCryptfs), or a path too long as a whole.
+                if (remoteOnly(name) && isNameTooLong(error)) {
+                    this.skipTooLong(itemPath);
+                    skipped.add(itemPath);
+                    continue;
                 }
                 if (kationError.code === 'NotFound' && !this.notFoundRetried.has(itemPath)) {
                     // Usually a race: the item or its folder changed on Proton during this pass
@@ -713,6 +731,23 @@ export class SyncEngine {
                 }
             }
         }
+        if (source === 'list') {
+            // Listed from the server: skipped items not seen again were renamed, moved or deleted.
+            for (const itemPath of this.skippedItems) {
+                if (parentOf(itemPath) === folder && !skipped.has(itemPath)) {
+                    this.skippedItems.delete(itemPath);
+                }
+            }
+        }
+    }
+
+    private skipTooLong(itemPath: string): void {
+        if (this.skippedItems.has(itemPath)) {
+            return;
+        }
+        this.skippedItems.add(itemPath);
+        this.logger.warn(`Not syncing ${itemPath}: its name or path is too long for the local file system`);
+        this.activity('skipped', itemPath, 'nameTooLong');
     }
 
     private async remoteChildren(
@@ -1382,6 +1417,7 @@ export class SyncEngine {
 
     private itemDone(itemPath: string, kind: SyncActivity['kind']): void {
         this.activity(kind, itemPath);
+        this.skippedItems.delete(itemPath);
         if (this.failedItems.delete(itemPath)) {
             this.options.onItemsChanged?.([itemPath]);
         }
@@ -1479,6 +1515,11 @@ function hasRemoteChange(remote: RemoteItem | undefined, base: BaseEntry | undef
 /** Proton Docs and Sheets only exist online; they cannot be downloaded as files. */
 function isProtonDocument(node: NodeEntity): boolean {
     return node.mediaType?.startsWith('application/vnd.proton.') ?? false;
+}
+
+function isNameTooLong(error: unknown): boolean {
+    const code = (error as NodeJS.ErrnoException)?.code ?? (error as { cause?: NodeJS.ErrnoException })?.cause?.code;
+    return code === 'ENAMETOOLONG';
 }
 
 function depth(folder: string): number {

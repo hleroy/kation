@@ -320,6 +320,44 @@ describe('resumable downloads', () => {
     });
 });
 
+describe('partial file names', () => {
+    it('stay within 255 bytes for long names, and are ignored by sync', async () => {
+        const { isIgnoredName } = await import('../src/sync/local');
+        const dir = await tempDir();
+        for (const name of [`${'a'.repeat(246)}.txt`, `${'é'.repeat(123)}.txt`, 'short.txt']) {
+            const part = path.basename(resumablePartPath(path.join(dir, name), 'revision-1'));
+            expect(Buffer.byteLength(part)).toBeLessThanOrEqual(255);
+            expect(isIgnoredName(part)).toBe(true);
+            expect(part).toMatch(/^\..+\.[0-9a-f]{8}\.kation-part$/);
+        }
+    });
+
+    it('downloads a long name through D-Bus Download and as a resumed sync download', async () => {
+        const { fake, drive } = setup({ chunkDelayMs: 15 });
+        const name = `${'é'.repeat(123)}.txt`;
+        const content = 'abcdefghij'.repeat(100_000);
+        const file = fake.add({ parentUid: fake.rootUid, name, type: NodeType.File, content });
+        const dir = await tempDir();
+        const local = path.join(dir, name);
+
+        const abort = new AbortController();
+        setTimeout(() => abort.abort(), 100);
+        await expect(
+            drive.downloadNode(await fake.sdk.getNode(file.uid), local, { signal: abort.signal, resumable: true }),
+        ).rejects.toMatchObject({ code: 'Cancelled' });
+        await Bun.sleep(50);
+        expect((await readdir(dir)).filter((entry) => entry.endsWith('.kation-part'))).toHaveLength(1);
+        fake.bytesServed = 0;
+        await drive.downloadNode(await fake.sdk.getNode(file.uid), local, { resumable: true });
+        expect(fake.bytesServed).toBeLessThan(content.length);
+        expect(await readdir(dir)).toEqual([name]);
+
+        await drive.download(`/${name}`, local);
+        expect(await readFile(local, 'utf8')).toBe(content);
+        expect(await readdir(dir)).toEqual([name]);
+    });
+});
+
 describe('partial files', () => {
     async function withVictim() {
         const dir = await tempDir();

@@ -133,7 +133,12 @@ describe('local helpers', () => {
         const root = await tempDir();
         await mkdir(path.join(root, 'Docs', 'Deep'), { recursive: true });
         await mkdir(path.join(root, 'Videos'));
-        const parts = [path.join(root, '.a.txt.0123abcd.kation-part'), path.join(root, 'Docs', 'Deep', '.b c.pdf.deadbeef.kation-part')];
+        const parts = [
+            path.join(root, '.a.txt.0123abcd.kation-part'),
+            path.join(root, 'Docs', 'Deep', '.b c.pdf.deadbeef.kation-part'),
+            // The form used when the name is too long for the other one.
+            path.join(root, 'Docs', '.kation-0123456789abcdef.0123abcd.kation-part'),
+        ];
         for (const part of parts) {
             await writeFile(part, 'partial');
         }

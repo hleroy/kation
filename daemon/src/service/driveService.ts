@@ -162,7 +162,7 @@ export class DriveService {
         // attributes whose signature verified, to check the result against.
         const resumable =
             !!options.resumable && !!expectedSha1 && claimedSize !== undefined && !!revision?.uid && revision.contentAuthor.ok;
-        const partPath = resumable ? resumablePartPath(localPath, revision!.uid) : `${localPath}.kation-part`;
+        const partPath = resumable ? resumablePartPath(localPath, revision!.uid) : partPathOf(localPath, '.kation-part', false);
 
         if (resumable) {
             await removeStaleParts(localPath, partPath);
@@ -416,16 +416,35 @@ export class DriveService {
 /** Hidden partial file for a resumable download, specific to the revision being downloaded. */
 export function resumablePartPath(localPath: string, revisionUid: string): string {
     const tag = createHash('sha1').update(revisionUid).digest('hex').slice(0, 8);
-    return path.join(path.dirname(localPath), `.${path.basename(localPath)}.${tag}.kation-part`);
+    return partPathOf(localPath, `.${tag}.kation-part`, true);
+}
+
+/** Longest file name Linux file systems take, in bytes. */
+const MAX_NAME_BYTES = 255;
+
+/**
+ * `<name><suffix>` next to the file (with a leading dot when hidden). When that is
+ * longer than a file name may be, `.kation-<hash of the name><suffix>` instead;
+ * sync ignores both forms (see isIgnoredName).
+ */
+function partPathOf(localPath: string, suffix: string, hidden: boolean): string {
+    const name = path.basename(localPath);
+    const part = `${hidden ? '.' : ''}${name}${suffix}`;
+    return path.join(path.dirname(localPath), Buffer.byteLength(part) <= MAX_NAME_BYTES ? part : `${shortPartPrefix(name)}${suffix}`);
+}
+
+function shortPartPrefix(name: string): string {
+    return `.kation-${createHash('sha1').update(name).digest('hex').slice(0, 16)}`;
 }
 
 /** Deletes partial downloads of older revisions of the same file. */
 async function removeStaleParts(localPath: string, currentPart: string): Promise<void> {
-    const prefix = `.${path.basename(localPath)}.`;
+    const name = path.basename(localPath);
+    const prefixes = [`.${name}.`, `${shortPartPrefix(name)}.`];
     const entries = await readdir(path.dirname(localPath)).catch(() => [] as string[]);
     for (const entry of entries) {
         const candidate = path.join(path.dirname(localPath), entry);
-        if (entry.startsWith(prefix) && entry.endsWith('.kation-part') && candidate !== currentPart) {
+        if (prefixes.some((prefix) => entry.startsWith(prefix)) && entry.endsWith('.kation-part') && candidate !== currentPart) {
             await unlink(candidate).catch(() => {});
         }
     }

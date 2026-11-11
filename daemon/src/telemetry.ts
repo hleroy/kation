@@ -17,6 +17,7 @@ import {
 } from '@protontech/drive-sdk/telemetry';
 
 import type { Config } from './config';
+import { printable } from './printable';
 import { FileLogHandler } from './proton/telemetry/fileHandler';
 import { ColoredLogFormatter } from './proton/telemetry/logFormatters';
 
@@ -32,10 +33,10 @@ export function initTelemetry(config: Config) {
     // The copied handler creates the log with the umask's mode; create it private first.
     closeSync(openSync(path.join(config.logDir, LOG_FILE_NAME), 'a', 0o600));
     const fileHandler = new FileLogHandler(config.logDir);
-    const logHandlers: LogHandler[] = [cancellationIsNotAnError(fileHandler)];
+    const logHandlers: LogHandler[] = [printableLog(cancellationIsNotAnError(fileHandler))];
     const metricHandlers: MetricHandler<MetricEvent>[] = [fileHandler];
     if (config.enableConsoleLog) {
-        logHandlers.push(cancellationIsNotAnError(new ConsoleLogHandler(new ColoredLogFormatter())));
+        logHandlers.push(printableLog(cancellationIsNotAnError(new ConsoleLogHandler(new ColoredLogFormatter()))));
     }
 
     const telemetry = new Telemetry({
@@ -60,6 +61,41 @@ export function initTelemetry(config: Config) {
             }
         },
     };
+}
+
+/**
+ * Messages and errors can hold remote names: their control characters are
+ * escaped, so one cannot start a forged line. The formatter's own line breaks
+ * (before the error and its stack) stay.
+ */
+export function printableLog(handler: LogHandler): LogHandler {
+    return {
+        log(record: LogRecord) {
+            handler.log({ ...record, message: printable(record.message), error: printableError(record.error) });
+        },
+    };
+}
+
+function printableError(error: unknown): unknown {
+    if (error === undefined) {
+        return undefined;
+    }
+    if (!(error instanceof Error)) {
+        return printable(String(error));
+    }
+    const message = printable(error.message);
+    if (message === error.message) {
+        return error;
+    }
+    // A copy of the same class (instanceof and name still work); the stack starts with the message.
+    const copy = Object.create(Object.getPrototypeOf(error)) as Error;
+    Object.defineProperties(copy, {
+        name: { value: error.name, writable: true, configurable: true },
+        message: { value: message, writable: true, configurable: true },
+        stack: { value: error.stack?.replace(error.message, message), writable: true, configurable: true },
+        cause: { value: error.cause, writable: true, configurable: true },
+    });
+    return copy;
 }
 
 /**

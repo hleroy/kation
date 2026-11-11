@@ -50,6 +50,9 @@ QString activityText(const QVariantMap &activity)
     if (kind == QLatin1String("conflict")) {
         return i18nc("recent activity", "Kept both versions of %1", name);
     }
+    if (kind == QLatin1String("skipped")) {
+        return i18nc("recent activity", "Not synced, its name is too long: %1", name);
+    }
     return i18nc("recent activity", "Could not sync %1", name);
 }
 
@@ -66,6 +69,9 @@ QString activityIcon(const QString &kind)
     }
     if (kind == QLatin1String("conflict")) {
         return QStringLiteral("document-duplicate");
+    }
+    if (kind == QLatin1String("skipped")) {
+        return QStringLiteral("dialog-warning");
     }
     return QStringLiteral("dialog-error");
 }
