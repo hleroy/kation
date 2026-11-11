@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A download is resumed only when the file's attributes carry a valid signature, and a resumed download is discarded and downloaded again in full unless both its size and SHA-1 match those attributes.
 - kationd's caches, log, sync state and settings are readable by the user only (files `0600` in `0700` folders), and existing ones are tightened at start; the KIO worker no longer creates `~/.cache/kation` readable by others.
 - Signing out also empties the log and deletes the rotated ones, partial downloads in the sync folder, the KIO worker's spool files and the deleted rows left in the sync state's database. The files in the sync folder and the settings stay.
+- File names are shown as text, never as markup, in the tray's tooltips, the "Create a Public Link?" question and the "link copied" notification: a crafted name could change what they said, including hiding the question's warning.
+- The settings and the Dolphin menu open only `https` addresses received from kationd (sign-in, Proton Drive website) and show an error for anything else.
 
 ### Fixed
 
