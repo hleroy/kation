@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The autostart entries of kationd (without systemd) and of the tray start the program by its absolute path, not through `PATH`; entries written by older versions are rewritten.
 - Releases publish `SHA256SUMS` and a build provenance attestation for each package (`gh attestation verify`).
 - `xml2js`, bundled in kationd through dbus-next, is updated to 0.6.2 (prototype pollution advisory GHSA-776f-qx25-q3cc).
+- `scripts/disable-gnome-keyring.sh` leaves a PAM file alone when a jump (`[success=N]`) passes over its `pam_gnome_keyring` line, which commenting out would make land one module further, and says how to change it by hand. If you ran the script of 0.2.0, run the new one again: it warns about a line it commented out inside such a jump, and says how to fix it.
 
 ### Fixed
 
