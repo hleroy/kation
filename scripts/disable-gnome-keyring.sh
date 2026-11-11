@@ -44,6 +44,11 @@ PAM_OURS="^$MARK"
 # Lines commented as "#-auth ..." by the first version of this script.
 PAM_LEGACY='^#(-(auth|session)[[:space:]]+[^[:space:]]+[[:space:]]+([^[:space:]]*/)?pam_gnome_keyring\.so)'
 
+# For tests only (scripts/test-disable-gnome-keyring.sh): run the PAM step alone.
+PAM_ONLY=${GNOME_KEYRING_PAM_ONLY:-0}
+# PAM files left unchanged because a jump passes over their keyring line.
+SKIPPED=()
+
 FORCE=0
 MODE=disable
 for arg in "$@"; do
@@ -55,7 +60,7 @@ for arg in "$@"; do
     esac
 done
 
-if [[ $EUID -eq 0 ]]; then
+if [[ $EUID -eq 0 && $PAM_ONLY != 1 ]]; then
     echo "Run this as your normal user, not root (it changes per-user settings)." >&2
     exit 1
 fi
@@ -102,6 +107,42 @@ pam_files() {
             echo "$f"
         done
     done
+}
+
+# Prints "<keyring line> <jump line>" for each active keyring line that a jump
+# passes over or lands on. A "[...=N]" control skips the next N module lines of
+# its type; comments and @include lines are not counted, include/substack are.
+pam_jumps() {
+    awk -v keyring="^$PAM_LINE" '
+    {
+        line = $0
+        sub(/^[[:space:]]+/, "", line)
+        if (line == "" || line ~ /^#/ || line ~ /^@/) next
+        type = line
+        sub(/[[:space:]].*/, "", type)
+        sub(/^-/, "", type)
+        pos = ++count[type]
+        at[type, pos] = NR
+        rest = line
+        sub(/^[^[:space:]]+[[:space:]]+/, "", rest)
+        if (rest ~ /^\[/) {
+            control = rest
+            sub(/\].*/, "", control)
+            while (match(control, /=[0-9]+/)) {
+                n = substr(control, RSTART + 1, RLENGTH - 1) + 0
+                if (n > jump[type, pos]) jump[type, pos] = n
+                control = substr(control, RSTART + RLENGTH)
+            }
+        }
+        if ((type == "auth" || type == "session") && line ~ keyring) {
+            for (j = 1; j < pos; j++) {
+                if (jump[type, j] >= pos - j) {
+                    print NR, at[type, j]
+                    break
+                }
+            }
+        }
+    }' "$1"
 }
 
 # ---------------------------------------------------------------- disable ---
@@ -158,8 +199,20 @@ disable_dbus() {
 disable_pam() {
     say "4/4 PAM ($PAM_DIR)"
     local f target changed=0
+    local jumps keyring_line jump_line
     while IFS= read -r f; do
         grep -Eq "$PAM_ACTIVE" "$f" || continue
+        jumps=$(pam_jumps "$f")
+        if [[ -n "$jumps" ]]; then
+            # Commenting out such a line would make the jump land one module further.
+            while read -r keyring_line jump_line; do
+                info "LEFT UNCHANGED: $f, line $keyring_line (pam_gnome_keyring) is within the jump on line $jump_line."
+                info "  To disable it by hand: comment out line $keyring_line, lower the number in line $jump_line by one,"
+                info "  then run this script again for the rest of the file."
+            done <<<"$jumps"
+            SKIPPED+=("$f")
+            continue
+        fi
         target="$PAM_DIR/${f##*/}"
         if [[ "$f" != "$target" ]]; then
             # Vendor file (e.g. openSUSE /usr/lib/pam.d): override it in /etc.
@@ -172,7 +225,7 @@ disable_pam() {
         info "disabled pam_gnome_keyring in $target"
         changed=1
     done < <(pam_files)
-    [[ $changed -eq 1 ]] || info "nothing active to disable"
+    [[ $changed -eq 1 || ${#SKIPPED[@]} -gt 0 ]] || info "nothing active to disable"
     if grep -lqs 'pam-config' "$PAM_DIR"/common-auth 2>/dev/null; then
         info "NOTE: openSUSE pam-config may rewrite common-* files later;"
         info "if gnome-keyring comes back, run: sudo pam-config --delete --gnome_keyring"
@@ -182,23 +235,25 @@ disable_pam() {
 # ------------------------------------------------------------------- undo ---
 
 undo_all() {
-    say "1/4 systemd user units"
-    if have_user_systemd; then
-        systemctl --user unmask "${UNITS[@]}" >/dev/null 2>&1
-        info "unmasked ${UNITS[*]}"
-    else
-        info "no systemd user session, skipped"
-    fi
-
-    say "2/4 XDG autostart"
     local f
-    for f in "$AUTOSTART_DIR"/gnome-keyring-*.desktop; do
-        [[ -f "$f" ]] && grep -qx 'Hidden=true' "$f" && rm -f "$f" && info "restored ${f##*/}"
-    done
+    if [[ $PAM_ONLY != 1 ]]; then
+        say "1/4 systemd user units"
+        if have_user_systemd; then
+            systemctl --user unmask "${UNITS[@]}" >/dev/null 2>&1
+            info "unmasked ${UNITS[*]}"
+        else
+            info "no systemd user session, skipped"
+        fi
 
-    say "3/4 D-Bus activation of org.freedesktop.secrets"
-    rm -f "$DBUS_FILE"
-    info "removed per-user override"
+        say "2/4 XDG autostart"
+        for f in "$AUTOSTART_DIR"/gnome-keyring-*.desktop; do
+            [[ -f "$f" ]] && grep -qx 'Hidden=true' "$f" && rm -f "$f" && info "restored ${f##*/}"
+        done
+
+        say "3/4 D-Bus activation of org.freedesktop.secrets"
+        rm -f "$DBUS_FILE"
+        info "removed per-user override"
+    fi
 
     say "4/4 PAM ($PAM_DIR)"
     for f in "$PAM_DIR"/*; do
@@ -228,9 +283,11 @@ else
         *GNOME*|*Unity*|*Cinnamon*|*MATE*|*Budgie*)
             echo "Note: $XDG_CURRENT_DESKTOP relies on GNOME Keyring; this disables it there too." ;;
     esac
-    disable_systemd
-    disable_autostart
-    disable_dbus
+    if [[ $PAM_ONLY != 1 ]]; then
+        disable_systemd
+        disable_autostart
+        disable_dbus
+    fi
     disable_pam
 fi
 
@@ -238,3 +295,9 @@ say ""
 say "Done. Reboot for the change to take full effect, then check:"
 say "    pgrep -a gnome-keyring          # should print nothing (after disabling)"
 say "    busctl --user status org.freedesktop.secrets 2>/dev/null | grep -E '^(Comm|CommandLine)='"
+
+if [[ ${#SKIPPED[@]} -gt 0 ]]; then
+    say ""
+    say "WARNING: pam_gnome_keyring is still enabled in ${SKIPPED[*]} (see LEFT UNCHANGED above)."
+    exit 3
+fi

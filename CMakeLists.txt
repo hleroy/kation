@@ -20,6 +20,10 @@ else()
     include(GNUInstallDirs)
 endif()
 include(CTest)
+if(BUILD_TESTING)
+    # The PAM step of scripts/disable-gnome-keyring.sh, on fixture files.
+    add_test(NAME keyring-script COMMAND bash "${PROJECT_SOURCE_DIR}/scripts/test-disable-gnome-keyring.sh")
+endif()
 
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/proton-drive-sdk/client/js/package.json")
     message(FATAL_ERROR "The Proton Drive SDK submodule is missing. Run: git submodule update --init")
