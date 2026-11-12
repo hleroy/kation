@@ -116,10 +116,13 @@ do, wait for their answer, then run the verification and record the result.
 Ask the tester to open **Kation** from the launcher and describe or
 screenshot it. Expected:
 
-- A window with three tabs: **General**, **Folders to Sync**, **Network and
-  Startup**. General shows "Signed in" with the test account email, a
-  Folder Sync section saying "Up to date. Last synced …", the italic
+- A window with four tabs: **General**, **Folders to Sync**, **Network and
+  Startup**, **About**. General shows "Signed in" with the test account
+  email, a Folder Sync section saying "Up to date. Last synced …", the italic
   third-party notice, and **Open Synced Folder**. Nothing is cut off.
+- **About** shows the installed version for Kation and the background
+  service, without a scroll bar; **Copy Version Info** copies the versions
+  as plain text.
 - A Kation icon (a K beside a cloud, with a green check-mark badge) in the
   system tray.
   Closing the window leaves the icon; launching Kation again opens the
@@ -161,7 +164,7 @@ from E2E-06 and the `Old` folder from E2E-11 are there (or the whole
 ### M5. System Settings (TESTER)
 
 Ask the tester to open System Settings → Network → **Proton Drive
-(Kation)** (or run `kcmshell6 kcm_kation`). Expected: the same three tabs
+(Kation)** (or run `kcmshell6 kcm_kation`). Expected: the same four tabs
 as the Kation window.
 
 1. **Folders to Sync**: the folders of "My files" are listed, all checked

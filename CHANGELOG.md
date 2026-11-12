@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- An About tab with the versions of Kation, its background service, the Proton Drive SDK, Qt, KDE Frameworks and the system (and a button that copies them for bug reports), the log file, links and licenses.
+
 ## [0.3.0] - 2026-11-11
 
 ### TL;DR

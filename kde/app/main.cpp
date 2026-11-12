@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kation contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "kationabout.h"
 #include "kationtypes.h"
 #include "settingswidget.h"
 #include "tray.h"
@@ -23,15 +24,7 @@ int main(int argc, char **argv)
     app.setQuitOnLastWindowClosed(false);
     KLocalizedString::setApplicationDomain("kation");
 
-    KAboutData about(QStringLiteral("kation"),
-                     i18n("Kation"),
-                     QStringLiteral(KATION_VERSION_STRING),
-                     i18n("Unofficial Proton Drive client for KDE Plasma"),
-                     KAboutLicense::GPL_V2,
-                     i18n("© 2026 Kation contributors"));
-    about.setOrganizationDomain("hleroy.com");
-    about.setDesktopFileName(QStringLiteral("com.hleroy.Kation"));
-    about.setOtherText(i18n("This is a third-party application not officially supported by Proton."));
+    KAboutData about = Kation::aboutData();
     KAboutData::setApplicationData(about);
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("com.hleroy.Kation")));
 

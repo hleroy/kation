@@ -11,6 +11,7 @@
 #include "fakekationd.h"
 #include "kationdriveinterface.h"
 
+#include "kationabout.h"
 #include "trayautostart.h"
 
 #include <KCModule>
@@ -18,10 +19,12 @@
 #include <KPluginMetaData>
 
 #include <QCheckBox>
+#include <QClipboard>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QLabel>
 #include <QPushButton>
 #include <QSignalSpy>
@@ -57,6 +60,9 @@ private Q_SLOTS:
     void cleanupTestCase();
     void signsInAndOut();
     void foldersLimitsAndStartup();
+    void aboutTab();
+    void displaysVersions();
+    void showLogNeedsALog();
     void systemSettingsMode();
     void loadsInSystemSettings();
     void quotesAutostartPrograms();
@@ -149,7 +155,8 @@ void SettingsWidgetTest::signsInAndOut()
     QVERIFY(QTest::qWaitForWindowExposed(m_window.get()));
 
     QTRY_COMPARE(state(), u"Not signed in"_s);
-    QVERIFY(m_window->findChild<QLabel *>(u"notice"_s)->isEnabled());
+    // Proton's guidelines: the notice wherever you sign in.
+    QVERIFY(m_window->findChild<QLabel *>(u"notice"_s)->isVisible());
     QVERIFY(button("signIn")->isVisible());
     QVERIFY(!button("signOut")->isVisible());
     screenshot(u"1-signed-out"_s);
@@ -163,6 +170,7 @@ void SettingsWidgetTest::signsInAndOut()
     screenshot(u"2-waiting"_s);
 
     QTRY_COMPARE_WITH_TIMEOUT(state(), u"Signed in"_s, 5000);
+    QVERIFY(m_window->findChild<QLabel *>(u"notice"_s)->isVisible());
     QVERIFY(m_window->findChild<QLabel *>(u"details"_s)->text().contains(u"tester@example.com"_s));
     QVERIFY(button("signOut")->isVisible());
     QVERIFY(button("openFiles")->isVisible());
@@ -297,6 +305,77 @@ void SettingsWidgetTest::foldersLimitsAndStartup()
     screenshot(u"6-network-startup"_s);
 }
 
+void SettingsWidgetTest::aboutTab()
+{
+    auto tabs = m_window->findChild<QTabWidget *>(u"tabs"_s);
+    QCOMPARE(tabs->tabText(3), u"About"_s);
+    tabs->setCurrentIndex(3);
+
+    KationDriveInterface drive(Kation::serviceName, Kation::objectPath, QDBusConnection::sessionBus());
+    QDBusPendingReply<QVariantMap> status = drive.GetStatus();
+    status.waitForFinished();
+    const QString serviceVersion = status.value().value(u"appVersion"_s).toString();
+    const QString sdkVersion = status.value().value(u"sdkVersion"_s).toString();
+    QVERIFY(!serviceVersion.isEmpty());
+    QVERIFY(!sdkVersion.isEmpty());
+    QCOMPARE(m_window->findChild<QLabel *>(u"appVersion"_s)->text(), u"Version " KATION_VERSION_STRING ""_s);
+    // Shown as "0.3.0 (fd6d8cb)", not as the identifier sent to Proton.
+    QVERIFY(serviceVersion.startsWith(u"external-drive-kation@" KATION_VERSION_STRING ""_s));
+    QVERIFY2(m_window->findChild<QLabel *>(u"serviceVersion"_s)->text().startsWith(u"" KATION_VERSION_STRING " ("_s),
+             qPrintable(m_window->findChild<QLabel *>(u"serviceVersion"_s)->text()));
+    QVERIFY(!m_window->findChild<QLabel *>(u"sdkVersion"_s)->text().contains(u'@'));
+    // The path kationd writes its log to; the label may elide it.
+    QVERIFY(QFileInfo::exists(Kation::logFilePath()));
+    QCOMPARE(m_window->findChild<QLabel *>(u"logFile"_s)->toolTip(), Kation::logFilePath());
+    QVERIFY(button("showLog")->isEnabled());
+    QVERIFY2(m_window->findChild<QLabel *>(u"legal"_s)->text().contains(u">GPL-2.0-or-later</a>, <a href=\"https://spdx.org/licenses/MIT.html\">MIT</a>"_s),
+             qPrintable(m_window->findChild<QLabel *>(u"legal"_s)->text()));
+
+    QTest::mouseClick(button("copyVersionInfo"), Qt::LeftButton);
+    const QString info = QGuiApplication::clipboard()->text();
+    QVERIFY2(info.startsWith(u"Kation " KATION_VERSION_STRING "\nkationd "_s + serviceVersion + u"\nProton Drive SDK "_s + sdkVersion + u'\n'),
+             qPrintable(info));
+    QVERIFY(info.contains(u"KDE Frameworks "_s));
+
+    m_openedUrls.clear();
+    Q_EMIT m_window->findChild<QLabel *>(u"links"_s)->linkActivated(u"https://github.com/hleroy/kation/issues"_s);
+    QCOMPARE(m_openedUrls, QList<QUrl>{QUrl(u"https://github.com/hleroy/kation/issues"_s)});
+    QVERIFY(m_window->findChild<QLabel *>(u"links"_s)->text().contains(u"href=\"https://github.com/hleroy/kation/issues\""_s));
+    // The tab must fit the Kation window's default size (main.cpp); a larger minimum would grow the window.
+    m_window->resize(560, 440);
+    QVERIFY2(m_window->minimumSizeHint().width() <= 560 && m_window->minimumSizeHint().height() <= 440,
+             qPrintable(u"%1x%2"_s.arg(m_window->minimumSizeHint().width()).arg(m_window->minimumSizeHint().height())));
+    QCOMPARE(m_window->size(), QSize(560, 440));
+    QTRY_VERIFY2(nothingClipped(), "Text or buttons of the window are cut off");
+    screenshot(u"7-about"_s);
+}
+
+void SettingsWidgetTest::displaysVersions()
+{
+    QCOMPARE(Kation::displayVersion(u"external-drive-kation@0.3.0-beta+fd6d8cb"_s), u"0.3.0 (fd6d8cb)"_s);
+    QCOMPARE(Kation::displayVersion(u"external-drive-kation@0.4.0-rc.1-beta+fd6d8cb"_s), u"0.4.0-rc.1 (fd6d8cb)"_s);
+    QCOMPARE(Kation::displayVersion(u"external-drive-kation@0.3.0-stable+unknown"_s), u"0.3.0"_s);
+    QCOMPARE(Kation::displayVersion(u"js@0.22.2+df3a717b"_s), u"0.22.2 (df3a717b)"_s);
+    QCOMPARE(Kation::displayVersion(u"js@1.0.0-beta.2+df3a717b"_s), u"1.0.0-beta.2 (df3a717b)"_s);
+    QCOMPARE(Kation::displayVersion(u"something else"_s), u"something else"_s);
+    QCOMPARE(Kation::displayVersion(QString()), u"Unknown"_s);
+}
+
+void SettingsWidgetTest::showLogNeedsALog()
+{
+    // A state folder kationd has never run with: no log yet.
+    QTemporaryDir state;
+    const QByteArray saved = qgetenv("XDG_STATE_HOME");
+    qputenv("XDG_STATE_HOME", QFile::encodeName(state.path()));
+    {
+        KationSettingsWidget widget;
+        auto showLog = widget.findChild<QPushButton *>(u"showLog"_s);
+        QVERIFY(!showLog->isEnabled());
+        QCOMPARE(showLog->toolTip(), u"There is no log file yet."_s);
+    }
+    qputenv("XDG_STATE_HOME", saved);
+}
+
 void SettingsWidgetTest::systemSettingsMode()
 {
     // In System Settings, changes wait for Apply.
@@ -327,6 +406,7 @@ void SettingsWidgetTest::loadsInSystemSettings()
     const KPluginMetaData metaData(QStringLiteral(KATION_KCM_PLUGIN));
     QVERIFY(metaData.isValid());
     QCOMPARE(metaData.value(u"X-KDE-System-Settings-Parent-Category"_s), u"network"_s);
+    QCOMPARE(metaData.license(), u"GPL-2.0-or-later"_s);
     QWidget parent;
     KCModule *module = KCModuleLoader::loadModule(metaData, &parent);
     QVERIFY(module);

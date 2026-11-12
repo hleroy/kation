@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # Settings widget shared by the Kation window and the System Settings module.
-add_library(kation_settings STATIC settingswidget.cpp trayautostart.cpp)
+add_library(kation_settings STATIC kationabout.cpp settingswidget.cpp trayautostart.cpp)
 target_include_directories(kation_settings PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kation_settings
-    PUBLIC kation_dbus Qt6::Widgets
+    PUBLIC kation_dbus Qt6::Widgets KF6::CoreAddons
     PRIVATE KF6::ConfigCore KF6::I18n KF6::KIOGui KF6::KIOWidgets
 )
 set_target_properties(kation_settings PROPERTIES POSITION_INDEPENDENT_CODE ON)
