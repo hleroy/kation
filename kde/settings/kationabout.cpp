@@ -6,6 +6,7 @@
 #include <KLocalizedString>
 
 #include <QDir>
+#include <QRegularExpression>
 
 namespace Kation
 {
@@ -27,6 +28,27 @@ KAboutData aboutData()
     about.setDesktopFileName(QStringLiteral("com.hleroy.Kation"));
     about.setOtherText(i18n("This is a third-party application not officially supported by Proton."));
     return about;
+}
+
+QString displayVersion(const QString &reported)
+{
+    if (reported.isEmpty()) {
+        return i18nc("version", "Unknown");
+    }
+    static const QRegularExpression pattern(QStringLiteral("^(?:([\\w-]+)@)?(\\d+\\.\\d+\\.\\d+(?:-[\\w.-]+)?)(?:\\+(\\w+))?$"));
+    const QRegularExpressionMatch match = pattern.match(reported);
+    if (!match.hasMatch()) {
+        return reported;
+    }
+    QString version = match.captured(2);
+    // kationd appends Proton's release channel to Kation's version (daemon/scripts/versions.ts).
+    if (match.captured(1).startsWith(QLatin1String("external-drive-"))) {
+        static const QRegularExpression channel(QStringLiteral("-(?:alpha|beta|stable)$"));
+        version.remove(channel);
+    }
+    // Built without git, the commit is "unknown".
+    const QString commit = match.captured(3);
+    return commit.isEmpty() || commit == QLatin1String("unknown") ? version : i18nc("version (commit)", "%1 (%2)", version, commit);
 }
 
 QString logFilePath()

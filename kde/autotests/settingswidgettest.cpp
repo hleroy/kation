@@ -11,6 +11,7 @@
 #include "fakekationd.h"
 #include "kationdriveinterface.h"
 
+#include "kationabout.h"
 #include "trayautostart.h"
 
 #include <KCModule>
@@ -60,6 +61,8 @@ private Q_SLOTS:
     void signsInAndOut();
     void foldersLimitsAndStartup();
     void aboutTab();
+    void displaysVersions();
+    void showLogNeedsALog();
     void systemSettingsMode();
     void loadsInSystemSettings();
     void quotesAutostartPrograms();
@@ -321,7 +324,10 @@ void SettingsWidgetTest::aboutTab()
     QVERIFY2(m_window->findChild<QLabel *>(u"serviceVersion"_s)->text().startsWith(u"" KATION_VERSION_STRING " ("_s),
              qPrintable(m_window->findChild<QLabel *>(u"serviceVersion"_s)->text()));
     QVERIFY(!m_window->findChild<QLabel *>(u"sdkVersion"_s)->text().contains(u'@'));
-    QVERIFY(m_window->findChild<QLabel *>(u"logFile"_s)->text().contains(u"/kation/kationd.log"_s));
+    // The path kationd writes its log to; the label may elide it.
+    QVERIFY(QFileInfo::exists(Kation::logFilePath()));
+    QCOMPARE(m_window->findChild<QLabel *>(u"logFile"_s)->toolTip(), Kation::logFilePath());
+    QVERIFY(button("showLog")->isEnabled());
     QVERIFY2(m_window->findChild<QLabel *>(u"legal"_s)->text().contains(u">GPL-2.0-or-later</a>, <a href=\"https://spdx.org/licenses/MIT.html\">MIT</a>"_s),
              qPrintable(m_window->findChild<QLabel *>(u"legal"_s)->text()));
 
@@ -337,10 +343,37 @@ void SettingsWidgetTest::aboutTab()
     QVERIFY(m_window->findChild<QLabel *>(u"links"_s)->text().contains(u"href=\"https://github.com/hleroy/kation/issues\""_s));
     // The tab must fit the Kation window's default size (main.cpp); a larger minimum would grow the window.
     m_window->resize(560, 440);
-    QVERIFY2(m_window->minimumSizeHint().height() <= 440, qPrintable(QString::number(m_window->minimumSizeHint().height())));
+    QVERIFY2(m_window->minimumSizeHint().width() <= 560 && m_window->minimumSizeHint().height() <= 440,
+             qPrintable(u"%1x%2"_s.arg(m_window->minimumSizeHint().width()).arg(m_window->minimumSizeHint().height())));
     QCOMPARE(m_window->size(), QSize(560, 440));
     QTRY_VERIFY2(nothingClipped(), "Text or buttons of the window are cut off");
     screenshot(u"7-about"_s);
+}
+
+void SettingsWidgetTest::displaysVersions()
+{
+    QCOMPARE(Kation::displayVersion(u"external-drive-kation@0.3.0-beta+fd6d8cb"_s), u"0.3.0 (fd6d8cb)"_s);
+    QCOMPARE(Kation::displayVersion(u"external-drive-kation@0.4.0-rc.1-beta+fd6d8cb"_s), u"0.4.0-rc.1 (fd6d8cb)"_s);
+    QCOMPARE(Kation::displayVersion(u"external-drive-kation@0.3.0-stable+unknown"_s), u"0.3.0"_s);
+    QCOMPARE(Kation::displayVersion(u"js@0.22.2+df3a717b"_s), u"0.22.2 (df3a717b)"_s);
+    QCOMPARE(Kation::displayVersion(u"js@1.0.0-beta.2+df3a717b"_s), u"1.0.0-beta.2 (df3a717b)"_s);
+    QCOMPARE(Kation::displayVersion(u"something else"_s), u"something else"_s);
+    QCOMPARE(Kation::displayVersion(QString()), u"Unknown"_s);
+}
+
+void SettingsWidgetTest::showLogNeedsALog()
+{
+    // A state folder kationd has never run with: no log yet.
+    QTemporaryDir state;
+    const QByteArray saved = qgetenv("XDG_STATE_HOME");
+    qputenv("XDG_STATE_HOME", QFile::encodeName(state.path()));
+    {
+        KationSettingsWidget widget;
+        auto showLog = widget.findChild<QPushButton *>(u"showLog"_s);
+        QVERIFY(!showLog->isEnabled());
+        QCOMPARE(showLog->toolTip(), u"There is no log file yet."_s);
+    }
+    qputenv("XDG_STATE_HOME", saved);
 }
 
 void SettingsWidgetTest::systemSettingsMode()

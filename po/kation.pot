@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kation 0.3.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-11 22:59+0100\n"
+"POT-Creation-Date: 2026-11-12 21:39+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -387,13 +387,13 @@ msgstr ""
 msgid "This is a third-party application not officially supported by Proton."
 msgstr ""
 
-#: kde/settings/settingswidget.cpp
+#: kde/settings/kationabout.cpp
 #, kde-format
 msgctxt "version"
 msgid "Unknown"
 msgstr ""
 
-#: kde/settings/settingswidget.cpp
+#: kde/settings/kationabout.cpp
 #, kde-format
 msgctxt "version (commit)"
 msgid "%1 (%2)"
@@ -442,6 +442,11 @@ msgstr ""
 #: kde/settings/settingswidget.cpp
 #, kde-format
 msgid "Show Kation in the system tray when I log in"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Show Log File"
 msgstr ""
 
 #: kde/settings/settingswidget.cpp
@@ -560,12 +565,7 @@ msgstr ""
 
 #: kde/settings/settingswidget.cpp
 #, kde-format
-msgid "Log file: <b>%1</b>"
-msgstr ""
-
-#: kde/settings/settingswidget.cpp
-#, kde-format
-msgid "Show Log File"
+msgid "Log file:"
 msgstr ""
 
 #: kde/settings/settingswidget.cpp
@@ -607,6 +607,11 @@ msgstr ""
 #: kde/settings/settingswidget.cpp
 #, kde-format
 msgid "Thanks to %1: <a href=\"%2\">%3</a>."
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "There is no log file yet."
 msgstr ""
 
 #: kde/settings/settingswidget.cpp

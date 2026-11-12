@@ -22,6 +22,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QGuiApplication>
@@ -30,7 +31,6 @@
 #include <QLabel>
 #include <QLocale>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QScopedValueRollback>
 #include <QSpinBox>
 #include <QSysInfo>
@@ -38,6 +38,7 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QtMath>
 
 namespace
 {
@@ -62,21 +63,58 @@ QWidget *wrapped(QLabel *label)
     return label;
 }
 
-/// "external-drive-kation@0.3.0-beta+fd6d8cb" (the version kationd sends to Proton) -> "0.3.0 (fd6d8cb)".
-QString shownVersion(const QString &reported)
+/// One line of plain text, elided when space is short, with the full text in its tooltip.
+/// A plain QLabel's minimum width is its whole text, which would widen the window.
+class ElidedLabel : public QLabel
 {
-    if (reported.isEmpty()) {
-        return i18nc("version", "Unknown");
+public:
+    ElidedLabel(const QString &text, Qt::TextElideMode mode, QWidget *parent)
+        : QLabel(parent)
+        , m_text(text)
+        , m_mode(mode)
+    {
+        setTextFormat(Qt::PlainText);
+        setToolTip(text);
+        setTextInteractionFlags(Qt::TextSelectableByMouse);
+        QLabel::setText(text);
     }
-    static const QRegularExpression pattern(QStringLiteral("^(?:[\\w-]+@)?(\\d+\\.\\d+\\.\\d+)[^+]*(?:\\+(\\w+))?$"));
-    const QRegularExpressionMatch match = pattern.match(reported);
-    if (!match.hasMatch()) {
-        return reported;
+
+    QSize sizeHint() const override
+    {
+        // Rounded up: elidedText() elides text whose fractional width exceeds the label's.
+        return {qCeil(QFontMetricsF(font()).horizontalAdvance(m_text)), QLabel::sizeHint().height()};
     }
-    // Built without git, the commit is "unknown".
-    const QString commit = match.captured(2);
-    return commit.isEmpty() || commit == QLatin1String("unknown") ? match.captured(1) : i18nc("version (commit)", "%1 (%2)", match.captured(1), commit);
-}
+
+    QSize minimumSizeHint() const override
+    {
+        return {fontMetrics().horizontalAdvance(QStringLiteral("……")), QLabel::minimumSizeHint().height()};
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QLabel::resizeEvent(event);
+        elide();
+    }
+
+    void changeEvent(QEvent *event) override
+    {
+        QLabel::changeEvent(event);
+        if (event->type() == QEvent::FontChange) {
+            updateGeometry();
+            elide();
+        }
+    }
+
+private:
+    void elide()
+    {
+        QLabel::setText(QFontMetricsF(font()).elidedText(m_text, m_mode, width()));
+    }
+
+    QString m_text;
+    Qt::TextElideMode m_mode;
+};
 
 QString withTilde(const QString &path)
 {
@@ -93,7 +131,7 @@ KationSettingsWidget::KationSettingsWidget(QWidget *parent)
     , m_tabs(new QTabWidget(this))
     , m_state(new QLabel(this))
     , m_details(new QLabel(this))
-    , m_notice(new QLabel(Kation::aboutData().otherText(), this))
+    , m_notice(new QLabel(this))
     , m_online(new QLabel(this))
     , m_signIn(new QPushButton(QIcon::fromTheme(QStringLiteral("im-user-online")), i18n("Sign In…"), this))
     , m_cancel(new QPushButton(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Cancel"), this))
@@ -115,6 +153,7 @@ KationSettingsWidget::KationSettingsWidget(QWidget *parent)
     , m_trayAtLogin(new QCheckBox(i18n("Show Kation in the system tray when I log in"), this))
     , m_serviceVersion(new QLabel(this))
     , m_sdkVersion(new QLabel(this))
+    , m_showLog(new QPushButton(QIcon::fromTheme(QStringLiteral("document-open-folder")), i18n("Show Log File"), this))
     , m_autoSaveTimer(new QTimer(this))
 {
     setWindowTitle(i18n("Kation"));
@@ -132,7 +171,9 @@ KationSettingsWidget::KationSettingsWidget(QWidget *parent)
     buildGeneralTab(general);
     buildFoldersTab(folders);
     buildAdvancedTab(advanced);
-    buildAboutTab(about);
+    const KAboutData aboutData = Kation::aboutData();
+    m_notice->setText(aboutData.otherText());
+    buildAboutTab(about, aboutData);
     m_tabs->addTab(general, i18n("General"));
     m_tabs->addTab(folders, i18n("Folders to Sync"));
     m_tabs->addTab(advanced, i18n("Network and Startup"));
@@ -323,9 +364,8 @@ void KationSettingsWidget::buildAdvancedTab(QWidget *tab)
     layout->addStretch();
 }
 
-void KationSettingsWidget::buildAboutTab(QWidget *page)
+void KationSettingsWidget::buildAboutTab(QWidget *page, const KAboutData &about)
 {
-    const KAboutData about = Kation::aboutData();
     page->setObjectName(QStringLiteral("about"));
 
     auto icon = new QLabel(page);
@@ -361,11 +401,11 @@ void KationSettingsWidget::buildAboutTab(QWidget *page)
         label->setTextInteractionFlags(Qt::TextSelectableByMouse);
         return label;
     };
-    components->addRow(i18n("Background service:"), value(m_serviceVersion, shownVersion(QString())));
-    components->addRow(i18n("Proton Drive SDK:"), value(m_sdkVersion, shownVersion(QString())));
+    components->addRow(i18n("Background service:"), value(m_serviceVersion, Kation::displayVersion(QString())));
+    components->addRow(i18n("Proton Drive SDK:"), value(m_sdkVersion, Kation::displayVersion(QString())));
     components->addRow(i18n("Qt:"), value(new QLabel, QString::fromLatin1(qVersion())));
     components->addRow(i18n("KDE Frameworks:"), value(new QLabel, KCoreAddons::versionString()));
-    components->addRow(i18n("System:"), value(new QLabel, QSysInfo::prettyProductName()));
+    components->addRow(i18n("System:"), new ElidedLabel(QSysInfo::prettyProductName(), Qt::ElideRight, componentsBox));
     auto copyInfo = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Copy Version Info"), componentsBox);
     copyInfo->setObjectName(QStringLiteral("copyVersionInfo"));
     auto componentsLayout = new QHBoxLayout(componentsBox);
@@ -374,14 +414,17 @@ void KationSettingsWidget::buildAboutTab(QWidget *page)
     componentsLayout->addWidget(copyInfo, 0, Qt::AlignVCenter);
 
     auto troubleshooting = new QGroupBox(i18n("Troubleshooting"), page);
-    auto log = new QLabel(i18n("Log file: <b>%1</b>", withTilde(Kation::logFilePath()).toHtmlEscaped()), troubleshooting);
+    auto log = new ElidedLabel(withTilde(Kation::logFilePath()), Qt::ElideMiddle, troubleshooting);
     log->setObjectName(QStringLiteral("logFile"));
-    log->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    auto showLog = new QPushButton(QIcon::fromTheme(QStringLiteral("document-open-folder")), i18n("Show Log File"), troubleshooting);
-    showLog->setObjectName(QStringLiteral("showLog"));
+    QFont logFont = log->font();
+    logFont.setBold(true);
+    log->setFont(logFont);
+    m_showLog->setObjectName(QStringLiteral("showLog"));
     auto troubleshootingLayout = new QHBoxLayout(troubleshooting);
+    troubleshootingLayout->addWidget(new QLabel(i18n("Log file:"), troubleshooting));
     troubleshootingLayout->addWidget(log, 1);
-    troubleshootingLayout->addWidget(showLog);
+    troubleshootingLayout->addWidget(m_showLog);
+    updateLogButton();
 
     const QString home = about.homepage();
     const auto link = [](const QString &url, const QString &text) {
@@ -432,9 +475,17 @@ void KationSettingsWidget::buildAboutTab(QWidget *page)
     connect(copyInfo, &QPushButton::clicked, this, [this] {
         QGuiApplication::clipboard()->setText(versionInfo());
     });
-    connect(showLog, &QPushButton::clicked, this, [] {
+    connect(m_showLog, &QPushButton::clicked, this, [] {
         KIO::highlightInFileManager({QUrl::fromLocalFile(Kation::logFilePath())});
     });
+}
+
+void KationSettingsWidget::updateLogButton()
+{
+    // kationd creates its log when it starts.
+    const bool exists = QFileInfo::exists(Kation::logFilePath());
+    m_showLog->setEnabled(exists);
+    m_showLog->setToolTip(exists ? QString() : i18n("There is no log file yet."));
 }
 
 QString KationSettingsWidget::versionInfo() const
@@ -539,7 +590,8 @@ void KationSettingsWidget::refresh()
             m_reportedAppVersion.clear();
             m_reportedSdkVersion.clear();
             m_serviceVersion->setText(i18n("Not running"));
-            m_sdkVersion->setText(shownVersion(QString()));
+            m_sdkVersion->setText(Kation::displayVersion(QString()));
+            updateLogButton();
             m_state->setText(i18n("Kation is not running"));
             showError(i18n("Could not reach the Kation background service: %1", reply.error().message()));
             return;
@@ -555,8 +607,9 @@ void KationSettingsWidget::showStatus(const QVariantMap &status)
     m_signInUrl = status.value(QStringLiteral("signInUrl")).toString();
     m_reportedAppVersion = status.value(QStringLiteral("appVersion")).toString();
     m_reportedSdkVersion = status.value(QStringLiteral("sdkVersion")).toString();
-    m_serviceVersion->setText(shownVersion(m_reportedAppVersion));
-    m_sdkVersion->setText(shownVersion(m_reportedSdkVersion));
+    m_serviceVersion->setText(Kation::displayVersion(m_reportedAppVersion));
+    m_sdkVersion->setText(Kation::displayVersion(m_reportedSdkVersion));
+    updateLogButton();
 
     m_signIn->setVisible(!loggedIn && !pending);
     m_signIn->setEnabled(true);

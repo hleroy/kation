@@ -9,6 +9,7 @@
 #include <QVariantMap>
 #include <QWidget>
 
+class KAboutData;
 class KationDriveInterface;
 class QCheckBox;
 class QGroupBox;
@@ -54,7 +55,8 @@ private:
     void buildGeneralTab(QWidget *tab);
     void buildFoldersTab(QWidget *tab);
     void buildAdvancedTab(QWidget *tab);
-    void buildAboutTab(QWidget *page);
+    void buildAboutTab(QWidget *page, const KAboutData &about);
+    void updateLogButton();
     /// Versions and system details for bug reports, in English.
     QString versionInfo() const;
     /// Grows the window so wrapped text and buttons are never cut off.
@@ -122,6 +124,7 @@ private:
 
     QLabel *m_serviceVersion;
     QLabel *m_sdkVersion;
+    QPushButton *m_showLog;
     /// As kationd reported them; empty when it could not be reached.
     QString m_reportedAppVersion;
     QString m_reportedSdkVersion;

@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kation 0.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-11 22:49+0100\n"
+"POT-Creation-Date: 2026-11-12 21:33+0100\n"
 "PO-Revision-Date: 2026-11-01 23:30+0100\n"
 "Last-Translator: Kation contributors\n"
 "Language-Team: French <kde-francophone@kde.org>\n"
@@ -417,13 +417,13 @@ msgstr ""
 "Ceci est une application tierce, qui n'est pas officiellement prise en "
 "charge par Proton."
 
-#: kde/settings/settingswidget.cpp
+#: kde/settings/kationabout.cpp
 #, kde-format
 msgctxt "version"
 msgid "Unknown"
 msgstr "Inconnue"
 
-#: kde/settings/settingswidget.cpp
+#: kde/settings/kationabout.cpp
 #, kde-format
 msgctxt "version (commit)"
 msgid "%1 (%2)"
@@ -473,6 +473,11 @@ msgstr "Limiter la vitesse de téléchargement à :"
 #, kde-format
 msgid "Show Kation in the system tray when I log in"
 msgstr "Afficher Kation dans la boîte à miniatures à l'ouverture de session"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Show Log File"
+msgstr "Afficher le fichier journal"
 
 #: kde/settings/settingswidget.cpp
 #, kde-format
@@ -602,13 +607,8 @@ msgstr "Dépannage"
 
 #: kde/settings/settingswidget.cpp
 #, kde-format
-msgid "Log file: <b>%1</b>"
-msgstr "Fichier journal : <b>%1</b>"
-
-#: kde/settings/settingswidget.cpp
-#, kde-format
-msgid "Show Log File"
-msgstr "Afficher le fichier journal"
+msgid "Log file:"
+msgstr "Fichier journal :"
 
 #: kde/settings/settingswidget.cpp
 #, kde-format
@@ -650,6 +650,11 @@ msgstr "Licences : %1"
 #, kde-format
 msgid "Thanks to %1: <a href=\"%2\">%3</a>."
 msgstr "Merci à %1 : <a href=\"%2\">%3</a>."
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgid "There is no log file yet."
+msgstr "Il n'y a pas encore de fichier journal."
 
 #: kde/settings/settingswidget.cpp
 #, kde-format
