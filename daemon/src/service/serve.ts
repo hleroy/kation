@@ -11,10 +11,10 @@ import dbus from 'dbus-next';
 
 import { type Config, CredentialsStoreType } from '../config';
 import { openDrive } from '../drive';
+import { initLogging } from '../logging';
 import { clearAfterSignOut, privateDirsOf, securePrivateDirs } from '../privateDirs';
 import { Autostart } from '../sync/autostart';
 import { SyncController } from '../sync/controller';
-import { initTelemetry } from '../telemetry';
 import { DriveDbusServer } from './dbusServer';
 import { DriveService } from './driveService';
 import { FakeAccount, FakeDrive } from './fakeDrive';
@@ -192,8 +192,8 @@ async function createProtonBackend(config: Config, onEvent: (event: DriveEvent) 
 
 async function createFakeBackend(config: Config, onEvent: (event: DriveEvent) => void): Promise<Backend> {
     const warnings = await securePrivateDirs(privateDirsOf(config));
-    const { telemetry, flush, clearLog } = initTelemetry(config);
-    const logger = telemetry.getLogger('kationd');
+    const { localLog, flush, clearLog } = initLogging(config);
+    const logger = localLog.getLogger('kationd');
     for (const warning of warnings) {
         logger.warn(warning);
     }
