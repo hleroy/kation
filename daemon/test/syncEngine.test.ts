@@ -10,7 +10,7 @@ import { DriveEventType, NodeType } from '@protontech/drive-sdk';
 import { DriveService } from '../src/service/driveService';
 import { FakeDrive } from '../src/service/fakeDrive';
 import { DriveTree } from '../src/service/tree';
-import { SAFETY_PAUSE_META, SyncEngine, type SyncEngineOptions } from '../src/sync/engine';
+import { foldersForLog, SAFETY_PAUSE_META, SyncEngine, type SyncEngineOptions } from '../src/sync/engine';
 import { moveToTrash } from '../src/sync/local';
 import { SyncState } from '../src/sync/state';
 import { countingSdk, silentLogger, tempDir } from './helpers';
@@ -1158,5 +1158,14 @@ describe('SyncEngine', () => {
         await ctx.settle();
         const node = child(ctx.fake, ctx.fake.rootUid, 'dated.txt')!;
         expect(Math.floor((await stat(ctx.local('dated.txt'))).mtimeMs / 1000)).toBe(Math.floor(node.modified.getTime() / 1000));
+    });
+});
+
+describe('foldersForLog', () => {
+    it('lists up to 10 folders and counts the rest', () => {
+        const folders = Array.from({ length: 25 }, (_, i) => `/f${i}`);
+        expect(foldersForLog([])).toBe('-');
+        expect(foldersForLog(folders.slice(0, 10))).toBe(folders.slice(0, 10).join(', '));
+        expect(foldersForLog(folders)).toBe(`${folders.slice(0, 10).join(', ')}, … (+15 more)`);
     });
 });

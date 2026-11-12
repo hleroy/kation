@@ -154,6 +154,15 @@ export const SAFETY_PAUSE_META = 'safetyPause';
 
 const PASS_ABORTING_CODES = new Set(['RateLimited', 'Connection', 'NotLoggedIn', 'Cancelled']);
 const MAX_RETRY_DELAY_MS = 10 * 60 * 1000;
+const MAX_LOGGED_FOLDERS = 10;
+
+/** The folders of a pass for its log line: a first sync has thousands of them. */
+export function foldersForLog(folders: string[]): string {
+    if (folders.length <= MAX_LOGGED_FOLDERS) {
+        return folders.join(', ') || '-';
+    }
+    return `${folders.slice(0, MAX_LOGGED_FOLDERS).join(', ')}, … (+${folders.length - MAX_LOGGED_FOLDERS} more)`;
+}
 
 export class SyncEngine {
     private readonly options: Required<Omit<SyncEngineOptions, Callbacks>> & Pick<SyncEngineOptions, Callbacks>;
@@ -376,10 +385,14 @@ export class SyncEngine {
         this.realRoot = undefined;
         this.abort = new AbortController();
         const abort = this.abort;
+        const folders = [...dirty.keys()];
         this.logger.info(
-            `Sync pass: ${full ? `full (${full})` : 'changes'}, folders ${[...dirty.keys()].join(', ') || '-'}` +
-                (this.paused ? ' [paused!]' : ''),
+            `Sync pass: ${full ? `full (${full})` : 'changes'}, folders ${foldersForLog(folders)}${this.paused ? ' [paused!]' : ''}`,
         );
+        if (folders.length > MAX_LOGGED_FOLDERS) {
+            // Not "Sync pass": the test plan greps the last such line.
+            this.logger.debug(`All folders of the pass: ${folders.join(', ')}`);
+        }
         this.setStatus({ state: 'syncing', message: '', reason: '' });
 
         let failedFolders: string[] = [];

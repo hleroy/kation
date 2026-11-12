@@ -5,6 +5,7 @@ import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { readdir, rm, truncate } from 'node:fs/promises';
 import path from 'node:path';
 
+import { ConnectionError } from '@protontech/drive-sdk';
 import {
     ConsoleLogHandler,
     LogFilter,
@@ -24,6 +25,9 @@ import { ColoredLogFormatter } from './proton/telemetry/logFormatters';
 /** The name FileLogHandler gives the current log; rotated ones add `.1` to `.5`. */
 const LOG_FILE_NAME = 'kationd.log';
 
+/** SDK loggers that write several INFO lines per request or transferred block. */
+const QUIET_SDK_LOGGERS = ['api', 'interface', 'upload', 'download'];
+
 /**
  * Logging to a local file: logs and SDK metrics go to a rotating log file (and
  * optionally the console). Nothing is sent to Proton or anywhere else. The SDK
@@ -34,16 +38,18 @@ export function initLogging(config: Config) {
     // The copied handler creates the log with the umask's mode; create it private first.
     closeSync(openSync(path.join(config.logDir, LOG_FILE_NAME), 'a', 0o600));
     const fileHandler = new FileLogHandler(config.logDir);
-    const logHandlers: LogHandler[] = [printableLog(cancellationIsNotAnError(fileHandler))];
-    const metricHandlers: MetricHandler<MetricEvent>[] = [fileHandler];
+    // safeLog runs first: the wrappers inside build messages from text it has escaped and masked.
+    const wrapped = (handler: LogHandler) => safeLog(networkErrorIsWarning(cancellationIsNotAnError(handler)));
+    const logHandlers: LogHandler[] = [wrapped(fileHandler)];
     if (config.enableConsoleLog) {
-        logHandlers.push(printableLog(cancellationIsNotAnError(new ConsoleLogHandler(new ColoredLogFormatter()))));
+        logHandlers.push(wrapped(new ConsoleLogHandler(new ColoredLogFormatter())));
     }
 
+    const logFilter = logFilterFor(config.logLevel);
     const localLog = new Telemetry({
-        logFilter: new LogFilter({ globalLevel: config.logLevel }),
+        logFilter,
         logHandlers,
-        metricHandlers,
+        metricHandlers: [metricsAsLogs(logFilter, logHandlers)],
     });
 
     return {
@@ -65,26 +71,96 @@ export function initLogging(config: Config) {
 }
 
 /**
- * Messages and errors can hold remote names: their control characters are
- * escaped, so one cannot start a forged line. The formatter's own line breaks
- * (before the error and its stack) stay.
+ * At INFO, the chatty SDK loggers only pass warnings and errors. Any other level
+ * applies to all loggers alike, so DEBUG brings their lines back.
  */
-export function printableLog(handler: LogHandler): LogHandler {
+export function logFilterFor(level: LogLevel): LogFilter {
+    const loggerLevels = level === LogLevel.INFO ? Object.fromEntries(QUIET_SDK_LOGGERS.map((name) => [name, LogLevel.WARNING])) : {};
+    return new LogFilter({ globalLevel: level, loggerLevels });
+}
+
+const FAILURE_METRICS = ['decryptionError', 'verificationError', 'blockVerificationError'];
+
+/** SDK metrics as lines of the same log, `[metrics] <event> {…}`: routine ones at DEBUG, failures at WARNING. */
+export function metricsAsLogs(filter: LogFilter, handlers: LogHandler[]): MetricHandler<MetricEvent> {
     return {
-        log(record: LogRecord) {
-            handler.log({ ...record, message: printable(record.message), error: printableError(record.error) });
+        onEvent({ time, event }) {
+            const { eventName, ...fields } = event as MetricEvent & Record<string, unknown>;
+            const record: LogRecord = {
+                time,
+                level: metricLevel(eventName, fields),
+                loggerName: 'metrics',
+                message: `${eventName} ${JSON.stringify(fields, metricValue)}`,
+            };
+            if (filter.filter(record)) {
+                for (const handler of handlers) {
+                    handler.log(record);
+                }
+            }
         },
     };
 }
 
-function printableError(error: unknown): unknown {
+function metricLevel(eventName: string, fields: Record<string, unknown>): LogLevel {
+    if (eventName === 'performance') {
+        return LogLevel.DEBUG;
+    }
+    if (eventName === 'upload' || eventName === 'download') {
+        return fields.error === undefined ? LogLevel.DEBUG : LogLevel.WARNING;
+    }
+    return FAILURE_METRICS.includes(eventName) ? LogLevel.WARNING : LogLevel.INFO;
+}
+
+function metricValue(_key: string, value: unknown): unknown {
+    // An Error serialises as {} or as its code and path only.
+    if (value instanceof Error) {
+        return value.message;
+    }
+    if (typeof value === 'number' && !Number.isInteger(value)) {
+        return Math.round(value * 10) / 10;
+    }
+    return value;
+}
+
+/**
+ * Messages and errors can hold remote names: their control characters are
+ * escaped, so one cannot start a forged line. The formatter's own line breaks
+ * (before the error and its stack) stay. Transfer tokens are masked.
+ */
+export function safeLog(handler: LogHandler): LogHandler {
+    return {
+        log(record: LogRecord) {
+            handler.log({ ...record, message: safeText(record.message), error: safeError(record.error) });
+        },
+    };
+}
+
+function safeText(text: string): string {
+    return maskTokens(printable(text));
+}
+
+/**
+ * The SDK names a block or thumbnail transfer by its token ("block 1:<token>: Uploaded"),
+ * which grants the transfer for hours. Block tokens are JWTs; thumbnail ones may not be.
+ */
+function maskTokens(text: string): string {
+    return text
+        .replace(/(?<![\w-])eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}/g, '<token>')
+        .replace(/\b(block \d+:|thumbnail (?:type \S+ to )?)[\w.~+/=-]{16,}(?=: )/g, '$1<token>');
+}
+
+function safeError(error: unknown): unknown {
     if (error === undefined) {
         return undefined;
     }
-    if (!(error instanceof Error)) {
-        return printable(String(error));
+    // The account SDK logs a failed session refresh with its Response as the error.
+    if (error instanceof Response) {
+        return safeText(`HTTP ${error.status} ${error.statusText}`.trimEnd());
     }
-    const message = printable(error.message);
+    if (!(error instanceof Error)) {
+        return safeText(String(error));
+    }
+    const message = safeText(error.message);
     if (message === error.message) {
         return error;
     }
@@ -109,12 +185,57 @@ export function cancellationIsNotAnError(handler: LogHandler): LogHandler {
     return {
         log(record: LogRecord) {
             if (record.level === LogLevel.ERROR && isAbort(record.error)) {
-                handler.log({ ...record, level: LogLevel.INFO, message: `${record.message} (stopped on purpose)` });
+                handler.log({ ...record, level: LogLevel.INFO, message: `${record.message} (stopped on purpose)`, error: undefined });
                 return;
             }
             handler.log(record);
         },
     };
+}
+
+const NETWORK_ERROR_CODE = /^(?:EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH)$/;
+// "getaddrinfo EAI_AGAIN host", "ECONNREFUSED: Unable to connect": only at the start, so a path holding such a word does not count.
+const NETWORK_ERROR_MESSAGE = /^(?:\w+ )?(?:EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH)\b/;
+
+/**
+ * Being offline or without DNS is routine (startup before the network is up,
+ * resume from sleep): such an ERROR becomes a one-line WARNING without the stack.
+ */
+export function networkErrorIsWarning(handler: LogHandler): LogHandler {
+    return {
+        log(record: LogRecord) {
+            if (
+                record.level === LogLevel.ERROR &&
+                record.error instanceof Error &&
+                !isAbort(record.error) &&
+                isNetworkError(record.error)
+            ) {
+                handler.log({
+                    ...record,
+                    level: LogLevel.WARNING,
+                    message: `${record.message}: ${record.error.message}`,
+                    error: undefined,
+                });
+                return;
+            }
+            handler.log(record);
+        },
+    };
+}
+
+function isNetworkError(error: unknown, depth = 0): boolean {
+    if (!(error instanceof Error) || depth > 5) {
+        return false;
+    }
+    if (error instanceof ConnectionError) {
+        return true;
+    }
+    // The message too: safeError's copy of an error does not carry its code.
+    const code = (error as { code?: unknown }).code;
+    if ((typeof code === 'string' && NETWORK_ERROR_CODE.test(code)) || NETWORK_ERROR_MESSAGE.test(error.message)) {
+        return true;
+    }
+    return isNetworkError(error.cause, depth + 1);
 }
 
 function isAbort(error: unknown): boolean {

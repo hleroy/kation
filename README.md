@@ -113,7 +113,8 @@ Logs stay on your computer; Kation sends no telemetry.
 
 Environment variables for `kationd`:
 
-- `KATION_LOG_LEVEL`: `DEBUG`, `INFO` (default), `WARNING` or `ERROR`.
+- `KATION_LOG_LEVEL`: `DEBUG`, `INFO` (default), `WARNING` or `ERROR`. `DEBUG` adds
+  the Proton SDK's details: each API call, block transfers and metrics.
 - `KATION_CREDENTIALS_STORE`: `keychain` (default), `pass`, or
   `unsafe_file` (plaintext, for tests only).
 
