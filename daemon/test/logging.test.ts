@@ -9,7 +9,7 @@ import { AbortError } from '@protontech/drive-sdk';
 import { LogLevel, type LogRecord } from '@protontech/drive-sdk/telemetry';
 
 import { getConfig } from '../src/config';
-import { cancellationIsNotAnError, initTelemetry } from '../src/telemetry';
+import { cancellationIsNotAnError, initLogging } from '../src/logging';
 import { tempDir } from './helpers';
 
 describe('cancellationIsNotAnError', () => {
@@ -43,8 +43,8 @@ describe('clearLog', () => {
     it('deletes rotated logs and empties the current one, which keeps working', async () => {
         const home = await tempDir();
         const config = getConfig({ appVersion: 'test', sdkVersion: 'test', home, env: {} });
-        const { telemetry, clearLog, flush } = initTelemetry(config);
-        const logger = telemetry.getLogger('test');
+        const { localLog, clearLog, flush } = initLogging(config);
+        const logger = localLog.getLogger('test');
         for (let i = 1; i <= 5; i++) {
             await writeFile(path.join(config.logDir, `kationd.log.${i}`), 'old /Secret/file.txt\n');
         }
@@ -70,8 +70,8 @@ describe('clearLog', () => {
         await mkdir(config.logDir, { recursive: true });
         const line = 'old line about /Secret/file.txt\n';
         await writeFile(path.join(config.logDir, 'kationd.log'), line.repeat(Math.floor((5 * 1024 * 1024 - 600) / line.length)));
-        const { telemetry, clearLog, flush } = initTelemetry(config);
-        const logger = telemetry.getLogger('test');
+        const { localLog, clearLog, flush } = initLogging(config);
+        const logger = localLog.getLogger('test');
 
         const clearing = clearLog();
         logger.info('x'.repeat(1000));
@@ -88,8 +88,8 @@ describe('log lines', () => {
     it('cannot be forged by text from a remote name', async () => {
         const home = await tempDir();
         const config = getConfig({ appVersion: 'test', sdkVersion: 'test', home, env: {} });
-        const { telemetry, flush } = initTelemetry(config);
-        const logger = telemetry.getLogger('test');
+        const { localLog, flush } = initLogging(config);
+        const logger = localLog.getLogger('test');
         // "$&" would bring the raw text back if used as a replacement pattern.
         const forged = 'a$&.txt\n2026-11-11T00:00:00.000Z ERROR [kationd] forged';
         logger.info(`Downloading /${forged}`);

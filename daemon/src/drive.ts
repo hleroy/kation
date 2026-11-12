@@ -13,13 +13,13 @@ import { FeatureFlags, type Logger, OpenPGPCryptoWithCryptoProxy, ProtonDriveCli
 import type { Config } from './config';
 import { type EventObserver, EventPoller } from './events';
 import { ReportingStore } from './keyring';
+import { initLogging } from './logging';
 import { clearAfterSignOut, privateDirsOf, securePrivateDirs } from './privateDirs';
 import { type ApiClient, initApi } from './proton/api';
 import { createCaches } from './proton/cache';
 import { getOrGenerateClientUid } from './proton/clientUid';
 import { initCredentials } from './proton/credentials';
 import { PersistedEventsProvider } from './proton/events';
-import { initTelemetry } from './telemetry';
 
 /** Same flags as the official CLI build. */
 const FEATURE_FLAGS: Partial<Record<FeatureFlags, boolean>> = {
@@ -32,8 +32,8 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
     // Before anything opens a file in them.
     const warnings = await securePrivateDirs(privateDirsOf(config));
 
-    const { telemetry, flush: flushTelemetry, clearLog } = initTelemetry(config);
-    const logger: Logger = telemetry.getLogger('kationd');
+    const { localLog, flush: flushLog, clearLog } = initLogging(config);
+    const logger: Logger = localLog.getLogger('kationd');
     logger.info(`Starting: app=${config.appVersion} sdk=${config.sdkVersion}`);
     for (const warning of warnings) {
         logger.warn(warning);
@@ -53,7 +53,7 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
         httpClient,
         entitiesCache: caches.entitiesCache,
         cryptoCache: caches.cryptoCache,
-        telemetry,
+        telemetry: localLog,
         openPGPCryptoModule,
         account: addresses,
         srpModule: srp,
@@ -79,7 +79,7 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
         addresses,
         sdk,
         events,
-        telemetry,
+        localLog,
         /** Calls `listener` when the session changes, including when Proton ends it. */
         onSessionChanged: (listener: () => void) => credentials.on('sessionInfoChanged', listener),
         /** Why kationd cannot work right now (e.g. no keyring), if anything. */
@@ -96,7 +96,7 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
         async dispose() {
             await events.stop();
             await eventsProvider.dispose();
-            await flushTelemetry();
+            await flushLog();
         },
     };
 }

@@ -25,10 +25,11 @@ import { ColoredLogFormatter } from './proton/telemetry/logFormatters';
 const LOG_FILE_NAME = 'kationd.log';
 
 /**
- * Local-only telemetry: logs and SDK metrics go to a rotating log file (and
- * optionally the console). Nothing is sent to Proton or anywhere else.
+ * Logging to a local file: logs and SDK metrics go to a rotating log file (and
+ * optionally the console). Nothing is sent to Proton or anywhere else. The SDK
+ * calls the object it logs through its "telemetry", hence the imports and `localLog`.
  */
-export function initTelemetry(config: Config) {
+export function initLogging(config: Config) {
     mkdirSync(config.logDir, { recursive: true, mode: 0o700 });
     // The copied handler creates the log with the umask's mode; create it private first.
     closeSync(openSync(path.join(config.logDir, LOG_FILE_NAME), 'a', 0o600));
@@ -39,14 +40,14 @@ export function initTelemetry(config: Config) {
         logHandlers.push(printableLog(cancellationIsNotAnError(new ConsoleLogHandler(new ColoredLogFormatter()))));
     }
 
-    const telemetry = new Telemetry({
+    const localLog = new Telemetry({
         logFilter: new LogFilter({ globalLevel: config.logLevel }),
         logHandlers,
         metricHandlers,
     });
 
     return {
-        telemetry,
+        localLog,
         flush: () => fileHandler.flush(),
         /** Deletes the rotated logs and empties the current one, which stays open. */
         clearLog: async () => {
