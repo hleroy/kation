@@ -1169,3 +1169,44 @@ describe('foldersForLog', () => {
         expect(foldersForLog(folders)).toBe(`${folders.slice(0, 10).join(', ')}, … (+15 more)`);
     });
 });
+
+describe('the sync pass log line', () => {
+    async function setupWithLog() {
+        const lines: string[] = [];
+        const log = (level: string) => (message: string) => void lines.push(`${level} ${message}`);
+        const ctx = await setup({ logger: { ...silentLogger, info: log('INFO'), debug: log('DEBUG') } });
+        const passLines = () => lines.filter((line) => /Sync pass|All folders/.test(line));
+        return { ...ctx, lines, passLines };
+    }
+
+    it('names the kind of pass and its folders', async () => {
+        const ctx = await setupWithLog();
+        await mkdir(ctx.local('Project'), { recursive: true });
+        await ctx.engine.start();
+        await ctx.settle();
+        expect(ctx.passLines()[0]).toBe('INFO Sync pass: full (fresh), folders -');
+
+        ctx.lines.length = 0;
+        ctx.engine.onLocalChange('/Project/draft.txt');
+        await ctx.settle();
+        expect(ctx.passLines()).toEqual(['INFO Sync pass: changes, folders /Project']);
+    });
+
+    it('lists every folder at the debug level only when the info line cuts the list', async () => {
+        const ctx = await setupWithLog();
+        const folders = Array.from({ length: 11 }, (_, i) => `/d${i}`);
+        await Promise.all(folders.map((folder) => mkdir(ctx.local(folder), { recursive: true })));
+        await ctx.engine.start();
+        await ctx.settle();
+
+        ctx.lines.length = 0;
+        for (const folder of folders) {
+            ctx.engine.onLocalChange(`${folder}/draft.txt`);
+        }
+        await ctx.settle();
+        expect(ctx.passLines()).toEqual([
+            `INFO Sync pass: changes, folders ${folders.slice(0, 10).join(', ')}, … (+1 more)`,
+            `DEBUG All folders of the pass: ${folders.join(', ')}`,
+        ]);
+    });
+});
