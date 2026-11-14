@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { lstat, mkdir, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { rmSync } from 'node:fs';
+import { chmod, lstat, mkdir, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { DriveEventType, NodeType } from '@protontech/drive-sdk';
@@ -322,6 +323,181 @@ describe('SyncEngine', () => {
         await ctx.settle();
         expect(child(ctx.fake, ctx.fake.rootUid, 'Old')).toBeUndefined();
         expect(folder.trashed).toBeDefined();
+    });
+
+    it('trashes a folder deleted locally as a whole when only a folder inside it is marked changed', async () => {
+        const activities: string[] = [];
+        const ctx = await setup({ onActivity: (activity) => activities.push(`${activity.kind} ${activity.path}`) });
+        const folder = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Old', type: NodeType.Folder });
+        const sub = ctx.fake.add({ parentUid: folder.uid, name: 'sub', type: NodeType.Folder });
+        for (const name of ['a', 'b', 'c']) {
+            ctx.fake.add({ parentUid: sub.uid, name, type: NodeType.File, content: name });
+        }
+        await ctx.engine.start();
+        await ctx.settle();
+        activities.length = 0;
+
+        await rm(ctx.local('Old'), { recursive: true });
+        ctx.engine.onLocalChange('/Old/sub/a');
+        await ctx.settle();
+
+        expect(activities).toEqual(['trashedRemote /Old']);
+        expect(folder.trashed).toBeDefined();
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('stops working in a new folder deleted locally while it is uploaded', async () => {
+        const log: string[] = [];
+        const record = (level: string) => (message: string) => log.push(`${level} ${message}`);
+        const logger = {
+            ...silentLogger,
+            info: (message: string) => {
+                log.push(`info ${message}`);
+                if (message === 'Uploading /Test/a.txt') {
+                    rmSync(ctx.local('Test'), { recursive: true });
+                }
+            },
+            warn: record('warn'),
+            error: record('error'),
+        };
+        const ctx = await setup({ logger });
+        await mkdir(ctx.local('Test/sub1/deep'), { recursive: true });
+        await mkdir(ctx.local('Test/sub2'));
+        await edit(ctx.local('Test/a.txt'), 'a');
+        await edit(ctx.local('Test/z.txt'), 'z');
+        await ctx.engine.start();
+        await ctx.settle();
+
+        expect(log.filter((line) => !line.startsWith('info Sync pass'))).toEqual([
+            'info Uploading /Test/a.txt',
+            'info /Test was removed here during sync; checking again',
+            'info Moving /Test to the Proton Drive trash (deleted locally)',
+        ]);
+        expect(child(ctx.fake, ctx.fake.rootUid, 'Test')).toBeUndefined();
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('does not create on Proton a new folder that vanished after its parent was scanned', async () => {
+        const log: string[] = [];
+        const logger = {
+            ...silentLogger,
+            info: (message: string) => {
+                log.push(message);
+                if (message === 'Uploading /Test/a.txt') {
+                    rmSync(ctx.local('Test/sub1'), { recursive: true });
+                }
+            },
+        };
+        const ctx = await setup({ logger });
+        await mkdir(ctx.local('Test/sub1'), { recursive: true });
+        await edit(ctx.local('Test/a.txt'), 'a');
+        await ctx.engine.start();
+        await ctx.settle();
+
+        expect(log.filter((line) => !line.startsWith('Sync pass'))).toEqual([
+            'Uploading /Test/a.txt',
+            '/Test/sub1 was removed here during sync; checking again',
+        ]);
+        expect([...ctx.fake.childrenOf(child(ctx.fake, ctx.fake.rootUid, 'Test')!.uid).keys()]).toEqual(['a.txt']);
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('keeps a version changed on Proton when the local file vanishes during the pass', async () => {
+        const logger = {
+            ...silentLogger,
+            info: (message: string) => {
+                if (message === 'Downloading /a.txt') {
+                    rmSync(ctx.local('notes.txt'));
+                }
+            },
+        };
+        const ctx = await setup({ logger });
+        const first = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'a.txt', type: NodeType.File, content: 'a' });
+        const notes = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'notes.txt', type: NodeType.File, content: 'notes' });
+        await ctx.engine.start();
+        await ctx.settle();
+
+        await edit(ctx.local('notes.txt'), 'notes, edited here');
+        ctx.fake.updateContent(first.uid, 'a v2');
+        ctx.fake.updateContent(notes.uid, 'notes, edited on Proton');
+        await ctx.settle();
+
+        expect(notes.trashed).toBeUndefined();
+        expect(await readFile(ctx.local('notes.txt'), 'utf8')).toBe('notes, edited on Proton');
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('hands a changed folder to its parent when a folder above it was replaced by a file', async () => {
+        const ctx = await setup();
+        const a = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'A', type: NodeType.Folder });
+        const b = ctx.fake.add({ parentUid: a.uid, name: 'B', type: NodeType.Folder });
+        ctx.fake.add({ parentUid: b.uid, name: 'f.txt', type: NodeType.File, content: 'f' });
+        await ctx.engine.start();
+        await ctx.settle();
+
+        await rm(ctx.local('A'), { recursive: true });
+        await edit(ctx.local('A'), 'now a file');
+        ctx.engine.onLocalChange('/A/B/f.txt');
+        await ctx.settle();
+
+        expect(a.trashed).toBeDefined();
+        expect(ctx.fake.contentOf(child(ctx.fake, ctx.fake.rootUid, 'A')!.uid)).toBe('now a file');
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('still syncs other folders when a changed folder is inside an unreadable one', async () => {
+        const ctx = await setup();
+        const a = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'A', type: NodeType.Folder });
+        const b = ctx.fake.add({ parentUid: a.uid, name: 'B', type: NodeType.Folder });
+        const z = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Z', type: NodeType.Folder });
+        const y = ctx.fake.add({ parentUid: z.uid, name: 'Y', type: NodeType.Folder });
+        await ctx.engine.start();
+        await ctx.settle();
+
+        await chmod(ctx.local('A'), 0o000);
+        try {
+            const f = ctx.fake.add({ parentUid: b.uid, name: 'f.txt', type: NodeType.File, content: 'f' });
+            const g = ctx.fake.add({ parentUid: y.uid, name: 'g.txt', type: NodeType.File, content: 'g' });
+            // Not awaited in between: both folders are in the same pass.
+            ctx.fake.remoteChange({ type: DriveEventType.NodeCreated, uid: f.uid });
+            ctx.fake.remoteChange({ type: DriveEventType.NodeCreated, uid: g.uid });
+            await untilError(ctx.engine);
+            expect(await readFile(ctx.local('Z/Y/g.txt'), 'utf8')).toBe('g');
+            expect(b.trashed).toBeUndefined();
+        } finally {
+            await chmod(ctx.local('A'), 0o755);
+        }
+    });
+
+    it('says that a file was removed here when it vanishes before its upload', async () => {
+        const log: string[] = [];
+        const logger = {
+            ...silentLogger,
+            info: (message: string) => {
+                log.push(`info ${message}`);
+                if (message === 'Uploading /a.txt') {
+                    rmSync(ctx.local('a.txt'));
+                }
+            },
+            warn: (message: string) => log.push(`warn ${message}`),
+            error: (message: string) => log.push(`error ${message}`),
+        };
+        const ctx = await setup({ logger });
+        await ctx.engine.start();
+        await ctx.settle();
+        await edit(ctx.local('a.txt'), 'a');
+        await edit(ctx.local('b.txt'), 'b');
+        ctx.engine.onLocalChange('/a.txt');
+        await ctx.settle();
+
+        expect(log.filter((line) => !line.startsWith('info Sync pass'))).toEqual([
+            'info Uploading /a.txt',
+            'info /a.txt was removed here during sync; checking again',
+            'info Uploading /b.txt',
+        ]);
+        expect(child(ctx.fake, ctx.fake.rootUid, 'a.txt')).toBeUndefined();
+        expect(ctx.fake.contentOf(child(ctx.fake, ctx.fake.rootUid, 'b.txt')!.uid)).toBe('b');
+        expect(ctx.engine.getStatus().state).toBe('idle');
     });
 
     it('syncs new folder trees in both directions', async () => {

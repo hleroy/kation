@@ -129,6 +129,8 @@ type FolderContext = {
     path: string;
     /** The remote folder, fetched (or created, with missing parents) on first use. */
     ensureRemote: () => Promise<NodeEntity>;
+    /** The folder was deleted locally and is being restored from Proton: its absence is expected. */
+    localMayBeMissing?: boolean;
 };
 
 /** Stops a pass and pauses sync until the user resumes it. */
@@ -146,6 +148,9 @@ class LocalChangedDuringDownload extends Error {}
 
 /** A symbolic link or special file has the name of a remote item: Kation neither follows nor replaces it. */
 class LinkInTheWay extends Error {}
+
+/** A local folder disappeared while the pass was working in it: its parent decides what to do. */
+class LocalFolderGone extends Error {}
 
 type Callbacks = 'onStatus' | 'onActivity' | 'onItemsChanged';
 
@@ -591,6 +596,27 @@ export class SyncEngine {
         }
     }
 
+    private async localFolderExists(folder: string): Promise<boolean> {
+        if (folder === '/') {
+            return true;
+        }
+        try {
+            return (await statItem(this.absolute(folder)))?.type === 'folder';
+        } catch (error: unknown) {
+            // ENOTDIR: a folder above was replaced by a file. Unreadable is not gone: scanning it reports the error.
+            return (error as NodeJS.ErrnoException).code !== 'ENOTDIR';
+        }
+    }
+
+    /** Throws LocalFolderGone when a folder is no longer there, or a SafetyPause when the sync folder itself went. */
+    private async checkLocalFolder(folder: string): Promise<void> {
+        if (await this.localFolderExists(folder)) {
+            return;
+        }
+        await this.checkRoot();
+        throw new LocalFolderGone(`${folder} no longer exists in the sync folder`);
+    }
+
     /** Syncs one folder (by its sync path). Returns the folders that had errors. */
     private async syncFolderAt(folder: string, fresh: boolean, recursive: boolean): Promise<string[]> {
         if (this.isExcluded(folder)) {
@@ -614,6 +640,11 @@ export class SyncEngine {
                 this.options.state.removePending(folder);
                 return this.syncFolderAt(parentOf(folder), fresh, false);
             }
+            if (!(await this.localFolderExists(folder))) {
+                // Deleted locally: its parent trashes it as a whole, not child by child.
+                this.options.state.removePending(folder);
+                return this.syncFolderAt(parentOf(folder), fresh, false);
+            }
             if (fresh) {
                 const remote = await this.getNodeOrUndefined(base.remoteUid);
                 if (!remote || remote.trashTime) {
@@ -627,7 +658,16 @@ export class SyncEngine {
             }
         }
         const errors: string[] = [];
-        await this.reconcileFolder(context, fresh ? 'list' : 'base', fresh, recursive, errors);
+        try {
+            await this.reconcileFolder(context, fresh ? 'list' : 'base', fresh, recursive, errors);
+        } catch (error: unknown) {
+            if (!(error instanceof LocalFolderGone)) {
+                throw error;
+            }
+            this.logger.info(`${folder} was removed here during sync; checking again`);
+            this.options.state.removePending(folder);
+            return [...errors, ...(await this.syncFolderAt(parentOf(folder), fresh, false))];
+        }
         if (!errors.includes(folder)) {
             this.options.state.removePending(folder);
         }
@@ -660,8 +700,15 @@ export class SyncEngine {
         let remote: Map<string, RemoteItem>;
         try {
             local = await scanFolder(this.absolute(folder));
+            if (local.size === 0 && !context.localMayBeMissing) {
+                // A missing folder scans as empty: its items must not be trashed one by one.
+                await this.checkLocalFolder(folder);
+            }
             remote = await this.remoteChildren(context, source, base);
         } catch (error: unknown) {
+            if (error instanceof SafetyPause || error instanceof LocalFolderGone) {
+                throw error;
+            }
             const kationError = toKationError(error);
             if (PASS_ABORTING_CODES.has(kationError.code)) {
                 throw kationError;
@@ -714,7 +761,19 @@ export class SyncEngine {
                     skipped.add(itemPath);
                     continue;
                 }
-                if (kationError.code === 'NotFound' && !this.notFoundRetried.has(itemPath)) {
+                const goneLocally = isGoneLocally(error);
+                if (goneLocally && !context.localMayBeMissing) {
+                    // The whole folder may have gone, not just this item: then stop working in it.
+                    await this.checkLocalFolder(folder);
+                }
+                if (goneLocally && !this.notFoundRetried.has(itemPath)) {
+                    this.notFoundRetried.add(itemPath);
+                    this.logger.info(`${itemPath} was removed here during sync; checking again`);
+                    // Listed again from the server: a remote change this pass saw must not be forgotten.
+                    this.markDirty(folder, true);
+                    continue;
+                }
+                if (kationError.code === 'NotFound' && !goneLocally && !this.notFoundRetried.has(itemPath)) {
                     // Usually a race: the item or its folder changed on Proton during this pass
                     // (for example trashed), and the event has not been applied yet. List the
                     // folder again from the server once before calling it an error.
@@ -921,7 +980,8 @@ export class SyncEngine {
                 }
                 return;
             }
-            // New local folder.
+            // New local folder, unless it went since its parent was scanned.
+            await this.checkLocalFolder(itemPath);
             const created = await this.options.drive.createFolderIn(await parent.ensureRemote(), name);
             this.recordFolder(itemPath, created.uid);
             await this.reconcileFolder(this.nodeContext(itemPath, created), 'empty', true, true, errors);
@@ -939,7 +999,7 @@ export class SyncEngine {
                 }
                 // Deleted locally but changed on Proton since the last sync. Children still have their
                 // base: unchanged ones follow the deletion, changed ones are downloaded.
-                await this.reconcileFolder(context, 'list', true, true, errors);
+                await this.reconcileFolder({ ...context, localMayBeMissing: true }, 'list', true, true, errors);
                 await this.checkRootBeforeWrite();
                 await this.checkNoLinkAbove(itemPath);
                 await mkdir(this.absolute(itemPath), { recursive: true });
@@ -1548,6 +1608,16 @@ function tooLongName(error: unknown): string | undefined {
 function isNameTooLong(error: unknown): boolean {
     const code = (error as NodeJS.ErrnoException)?.code ?? (error as { cause?: NodeJS.ErrnoException })?.cause?.code;
     return code === 'ENAMETOOLONG';
+}
+
+/** Whether an error means that a local file or folder is no longer there (never Proton's "not found"). */
+function isGoneLocally(error: unknown): boolean {
+    for (let current = error; current instanceof Error; current = current.cause) {
+        if (current instanceof LocalFolderGone || (current as NodeJS.ErrnoException).code === 'ENOENT') {
+            return true;
+        }
+    }
+    return false;
 }
 
 function depth(folder: string): number {
