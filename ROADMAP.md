@@ -76,58 +76,62 @@ Unofficial Proton Drive client for KDE Plasma.
   the Kation window: account, sync, folders to sync (tree), speed limits,
   tray at login.
 
-## Roadmap (not prioritized)
+## Roadmap
 
-Ideas for after the initial release, grouped by area. The order means
-nothing yet.
+Ranked in November 2026 by comparing Kation 0.3.0 with Proton's Windows and
+macOS apps and with the most voted ideas on Proton's
+[UserVoice](https://protonmail.uservoice.com/forums/932839-proton-drive/filters/top).
 
-**Sharing**
+- **Must:** a gap in reliable file sync, or a feature users expect from any
+  Proton Drive desktop client.
+- **Should:** high value (the official apps have it, or more than about 500
+  votes) and feasible with the SDK.
+- **Could:** useful, with lower demand or a higher cost.
+- **Minor:** small improvements, not part of the comparison.
 
-- Manage public links from the desktop: password, expiry, removal. (Kation
-  can already show, create and copy a view-only link.)
-- Share with people by email, and see what you shared ("Shared by me").
-- "Shared with me": browse items others shared, accept or decline
-  invitations.
+W and M say whether the Windows and macOS apps have the feature (✓ yes,
+◐ partly, — no, ? not confirmed). Votes are UserVoice votes for the related
+ideas on 11 November 2026.
 
-**Trash and versions**
-
-- Browse the Proton trash, restore items, delete for good, empty it.
-  (Kation already sends every deletion to the Proton trash.)
-- File versions: list them, open an old one, restore it. (Kation already
-  makes each local edit a new version on Proton.)
-
-**More of Proton Drive**
-
-- Photos.
-- KRunner search. The SDK's search is experimental; searching names in
-  Kation's own cache and sync database is likely more reliable.
-- Multiple accounts.
-
-**Online view**
-
-- Stream downloads to applications instead of downloading the whole file
-  first (KIO `get`).
-- Generate thumbnails on upload, as the Proton CLI does.
-
-**Sync**
-
-- Detect renames and moves instead of transferring the file again.
-- Transfer several files in parallel (within Proton's limits).
-- Warn when the folder has more subfolders than inotify can watch.
-- Clean up partial downloads of files that were deleted remotely.
-- Keep recent activity across restarts (it is in memory only).
-- Speed limits are averages over all transfers; short bursts can exceed them.
-
-**Release**
-
-- Publish the packages: AUR, a Fedora COPR, an APT repository.
-- More translations (French is done), user documentation.
-- Optional: submit the project to KDE.
+|   # | Feature                                     | Priority   |  W  |  M  |                   Votes | Notes                                                                                                                                                                                                    |
+| --: | :------------------------------------------ | :--------- | :-: | :-: | ----------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|   1 | Rename and move detection                   | **Must**   |  ✓  |  ✓  |                       — | A local rename or move is transferred again as a new file, which loses its version history and public link.                                                                                              |
+|   2 | Follow the SDK to the new encryption scheme | **Must**   |  ✓  |  ✓  |                       — | Older SDK versions will stop working (see Risks).                                                                                                                                                        |
+|   3 | "Shared with me"                            | **Must**   |  ✓  |  ◐  |                     926 | Browse items others shared, accept or decline invitations, sync them.                                                                                                                                    |
+|   4 | Sync any local folder                       | **Must**   |  ✓  |  ◐  |               436 + 419 | Documents, an external disk… Kation syncs one folder with "My files" only.                                                                                                                               |
+|   5 | Storage quota                               | **Must**   |  ✓  |  ✓  |                       — | Show the space used and available, warn near the limit, and report a full account with its own problem code instead of a generic error.                                                                  |
+|   6 | Photos import                               | **Should** |  ✓  |  —  |             1 668 + 939 | Import a local folder or a Google Takeout export into Photos.                                                                                                                                            |
+|   7 | Exclusion patterns                          | **Should** |  —  |  —  |                     774 | `.gitignore`-style rules (`node_modules`, build output), on top of the folders to sync.                                                                                                                  |
+|   8 | Detailed sync progress                      | **Should** |  ✓  |  ✓  |                     691 | The list of transfers with per-file progress. Kation shows the current path and the number of pending folders.                                                                                           |
+|   9 | Parallel transfers                          | **Should** |  ?  |  ?  |                       — | Several files at once, within Proton's limits. One at a time is slow for many small files.                                                                                                               |
+|  10 | Thumbnails on upload                        | **Should** |  ✓  |  ?  |                       — | As the Proton CLI does, so that uploaded files have a preview in the web and mobile apps.                                                                                                                |
+|  11 | Package repositories                        | **Should** |  ✓  |  ✓  |                   2 130 | AUR, a Fedora COPR, an APT repository: updates through the system updater, where the official apps update themselves. Votes are for a Linux client.                                                      |
+|  12 | Full resync                                 | **Should** |  —  |  ✓  |                       — | Rebuild the local state database without signing out.                                                                                                                                                    |
+|  13 | Proton Docs and Sheets as links             | **Could**  |  ✓  |  ✓  |                       — | Links that open the web editor, in the sync folder and in `protondrive:/`. Kation skips these files today.                                                                                               |
+|  14 | Timed pause                                 | **Could**  |  ✓  |  —  |                       — | Pause for a few hours or until the next day.                                                                                                                                                             |
+|  15 | Sharing                                     | **Could**  |  —  |  ◐  |                     363 | Public links: password, expiry, removal (Kation already shows, creates and copies a view-only link). Share with people by email; "Shared by me".                                                         |
+|  16 | KRunner search                              | **Could**  |  —  |  —  |               229 + 120 | The SDK's search is experimental; searching names in Kation's own cache and sync database is likely more reliable.                                                                                       |
+|  17 | Folder sizes                                | **Could**  |  —  |  —  |                     564 | Sizes and item counts in Dolphin's Properties dialog.                                                                                                                                                    |
+|  18 | Trash and versions                          | **Could**  |  —  |  —  |                     114 | Browse the Proton trash, restore, delete for good, empty it. List file versions, open or restore an old one. Kation already sends deletions to the Proton trash and makes each local edit a new version. |
+|  19 | Access from non-KDE apps and scripts        | **Could**  |  —  |  —  | 1 021 + 704 + 409 + 264 | FUSE or WebDAV; the `kationd` commands cover part of it.                                                                                                                                                 |
+|  20 | Multiple accounts                           | **Could**  |  —  |  —  |                       — |                                                                                                                                                                                                          |
+|  21 | "Report a problem"                          | **Could**  |  ✓  |  ✓  |                       — | Collect the log and open a prefilled GitHub issue.                                                                                                                                                       |
+|  22 | Streamed downloads                          | Minor      |     |     |                         | Stream to applications instead of downloading the whole file first (KIO `get`).                                                                                                                          |
+|  23 | inotify limit warning                       | Minor      |     |     |                         | Warn when the folder has more subfolders than inotify can watch.                                                                                                                                         |
+|  24 | Partial download cleanup                    | Minor      |     |     |                         | Remove partial downloads of files that were deleted remotely.                                                                                                                                            |
+|  25 | Persistent recent activity                  | Minor      |     |     |                         | Keep it across restarts (it is in memory only).                                                                                                                                                          |
+|  26 | Stricter speed limits                       | Minor      |     |     |                         | Limits are averages over all transfers; short bursts can exceed them.                                                                                                                                    |
+|  27 | Translations and documentation              | Minor      |     |     |                         | More translations (French is done), user documentation.                                                                                                                                                  |
+|  28 | Submit the project to KDE                   | Minor      |     |     |                         | Optional.                                                                                                                                                                                                |
 
 ## Out of scope
 
 - Files that appear locally but download only when opened. Everything that is
-  synced is fully downloaded.
+  synced is fully downloaded. Linux has no system API for placeholders, so
+  this would take a FUSE file system; `protondrive:/` and the folders to sync
+  stand in for it. To revisit if users ask.
+- Browsing and organizing photos (albums, search, duplicates) and editing
+  Docs and Sheets: these belong to Proton's web and mobile apps.
 - Flatpak and Snap. Both sandbox the app, while most of Kation runs inside
   the system's own KDE programs: the `protondrive:/` KIO worker, the Dolphin
   emblems and context menu, and the System Settings module are plugins they
@@ -151,4 +155,6 @@ nothing yet.
 - Proton plans an encryption model change for late 2026 / early 2027 that will
   break older SDK versions, so we must upgrade quickly when it lands.
 - The SDK may only be used for personal, non-commercial projects.
-- Proton may ship its own Linux sync client.
+- Proton plans an official Linux beta, likely a sync daemon without a
+  desktop interface. Kation's distinct value would then be the Plasma
+  integration (Dolphin, KIO, tray, System Settings).
