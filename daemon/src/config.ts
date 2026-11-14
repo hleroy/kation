@@ -8,47 +8,25 @@ import { ValidationError } from '@protontech/drive-sdk';
 import { LogLevel } from '@protontech/drive-sdk/telemetry';
 
 import { APP_DIR_NAME, CLIENT_UID_PREFIX } from './appInfo';
-
-export enum CredentialsStoreType {
-    /** Secret Service (KWallet, GNOME Keyring) through libsecret. */
-    Keychain = 'keychain',
-    /** GPG-encrypted entry in password-store (`pass`). */
-    Pass = 'pass',
-    /** Plaintext file. For tests only. */
-    UnsafeFile = 'unsafe_file',
-}
+import { CredentialsStoreType, type Config as ProtonConfig } from './proton/config';
 
 /**
- * Runtime configuration. Field names match the Proton CLI's config so the
- * vendored modules in `src/proton` can use it unchanged.
+ * Where the session is kept: `keychain` is the Secret Service (KWallet, GNOME
+ * Keyring) through libsecret, `pass` a GPG-encrypted password-store entry,
+ * `unsafe_file` a plaintext file for tests only.
  */
-export interface Config {
-    clientUidPrefix: string;
-    /** `x-pm-appversion` header value. */
-    appVersion: string;
-    /** Proton's client ID for third-party apps using the browser sign-in. */
-    authClientId: string;
-    /** `x-pm-drive-sdk-version` header value. */
-    sdkVersion?: string;
-    /** Drive API host. */
-    baseUrl: string;
-    /** Account (sign-in) web host. */
-    accountUrl: string;
-    /** Ephemeral files: encrypted metadata caches. */
-    cacheDir: string;
-    /** Persistent files: client UID, event cursors. */
-    appDir: string;
-    logDir: string;
+export { CredentialsStoreType };
+
+/**
+ * Runtime configuration: the Proton CLI's, which the modules in `src/proton`
+ * read, plus Kation's own fields. Only the types of `proton/config.ts` are
+ * used; its `getConfig` (the CLI's variables and folders) is not.
+ */
+export interface Config extends ProtonConfig {
     /** Settings (sync folder, exclusions). */
     configDir: string;
     /** User's home folder; the default sync folder lives there. */
     homeDir: string;
-    enablePersistedEvents: boolean;
-    enableConsoleLog: boolean;
-    logLevel: LogLevel;
-    credentialsStore: CredentialsStoreType;
-    /** Tests only: store the caches unencrypted. */
-    unsafeCache: boolean;
 }
 
 export type ConfigOptions = {
@@ -89,6 +67,8 @@ export function getConfig(options: ConfigOptions): Config {
         homeDir: home,
         enablePersistedEvents: true,
         enableConsoleLog: options.enableConsoleLog ?? false,
+        // Kation sends no metrics; the field belongs to the CLI's config.
+        enableMetrics: false,
         logLevel,
         credentialsStore: parseCredentialsStore(env.KATION_CREDENTIALS_STORE),
         unsafeCache: false,

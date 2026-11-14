@@ -156,9 +156,11 @@ test.
 After updating the `third_party/proton-drive-sdk` submodule, run
 `bun install` again: Bun keeps its own copy of the SDK in `node_modules`.
 
-`daemon/src/proton/` holds code copied from the Proton Drive CLI; see its
-[README](daemon/src/proton/README.md) before changing it, and never
-reformat it.
+`daemon/src/proton/` holds code copied from the Proton Drive CLI in that
+submodule. It is never edited by hand: its
+[README](daemon/src/proton/README.md) lists the two changes Kation makes and
+the steps to move to a newer CLI release, and ctest's `proton-copy` fails when
+the copy differs from upstream in any other way.
 
 ### End-to-end tests
 

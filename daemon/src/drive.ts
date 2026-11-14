@@ -12,14 +12,14 @@ import { FeatureFlags, type Logger, OpenPGPCryptoWithCryptoProxy, ProtonDriveCli
 
 import type { Config } from './config';
 import { type EventObserver, EventPoller } from './events';
-import { ReportingStore } from './keyring';
+import { createSessionStore } from './keyring';
 import { initLogging } from './logging';
 import { clearAfterSignOut, privateDirsOf, securePrivateDirs } from './privateDirs';
 import { type ApiClient, initApi } from './proton/api';
 import { createCaches } from './proton/cache';
 import { getOrGenerateClientUid } from './proton/clientUid';
-import { initCredentials } from './proton/credentials';
-import { PersistedEventsProvider } from './proton/events';
+import { Credentials } from './proton/credentials/credentials';
+import { PersistedEventsProvider } from './proton/events/providerPersisted';
 
 /** Same flags as the official CLI build. */
 const FEATURE_FLAGS: Partial<Record<FeatureFlags, boolean>> = {
@@ -40,8 +40,8 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
     }
 
     const openPGPCryptoModule = initOpenPGPCryptoModule();
-    let store: ReportingStore | undefined;
-    const credentials = initCredentials(config, logger, (inner) => (store = new ReportingStore(inner, logger)));
+    const store = createSessionStore(config, logger);
+    const credentials = new Credentials(store, logger);
     const { auth, addresses, srp, httpClient, apiClient } = await initApi(config, credentials, logger, CryptoProxy);
 
     const clientUid = await getOrGenerateClientUid(config, logger);
@@ -83,7 +83,7 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
         /** Calls `listener` when the session changes, including when Proton ends it. */
         onSessionChanged: (listener: () => void) => credentials.on('sessionInfoChanged', listener),
         /** Why kationd cannot work right now (e.g. no keyring), if anything. */
-        problem: () => store?.problem,
+        problem: () => store.problem,
         async signOut() {
             // Stop polling first: requests made after the revocation fail with 401.
             await events.stop();
