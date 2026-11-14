@@ -73,6 +73,10 @@ Work on a branch named `<type>/<short-description>`, open a PR, and squash-merge
 reformat goes in a PR of its own, so that its squash commit can be listed in
 `.git-blame-ignore-revs`.
 
+Write the PR description from `.github/pull_request_template.md` (`gh pr create
+--body` does not apply it): its three sections, about 150 words, comments removed.
+It becomes the commit message on `main`.
+
 ## Changelog
 
 Add a line to `[Unreleased]` in `CHANGELOG.md` for every user-visible change. One
