@@ -13,7 +13,36 @@ export type LocalItem = {
     size: number;
     /** Modification time in ms. */
     mtime: number;
+    /** Inode and birth time (ms, 0 when the file system has none): the same after a rename or move. */
+    ino: number;
+    btime: number;
 };
+
+/** What the base recorded about a local item (see BaseEntry). */
+export type LocalIdentity = {
+    type: 'file' | 'folder';
+    localSize: number | null;
+    localMtime: number | null;
+    localIno?: number | null;
+    localBtime?: number | null;
+};
+
+/**
+ * Whether a local item found at a new path is the synced item `base`, renamed or
+ * moved. Inode numbers are reused after a deletion, so the inode alone is not enough:
+ * a file must also be unchanged or have the same birth time, a folder the same birth
+ * time when known. The caller checks that the old path no longer holds that inode.
+ */
+export function isSameLocalItem(item: LocalItem, base: LocalIdentity): boolean {
+    if (!item.ino || base.localIno !== item.ino || base.type !== item.type) {
+        return false;
+    }
+    const sameBirth = !!item.btime && item.btime === base.localBtime;
+    if (item.type === 'file') {
+        return sameBirth || (item.size === base.localSize && item.mtime === base.localMtime);
+    }
+    return sameBirth || !item.btime || !base.localBtime;
+}
 
 /** Marker file in the sync folder root; if it disappears, the folder was replaced or unmounted. */
 export const MARKER_NAME = '.kation-sync';
@@ -70,6 +99,8 @@ export async function statItem(absolutePath: string): Promise<LocalItem | undefi
             type: info.isDirectory() ? 'folder' : 'file',
             size: info.isDirectory() ? 0 : info.size,
             mtime: info.mtimeMs,
+            ino: info.ino,
+            btime: info.birthtimeMs || 0,
         };
     } catch (error: unknown) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {

@@ -15,6 +15,12 @@
  * base. The whole tree is listed only for the first sync or when Drive asks
  * for a refresh, as Proton's guidelines require. Local changes come from a
  * file watcher plus periodic local scans, which cost nothing remotely.
+ *
+ * A rename or move is applied as such on the other side, so the file keeps its
+ * history and is not transferred again. A local one is recognised by the item's
+ * inode, before the pass reconciles anything (see detectLocalMoves); a remote one
+ * by the node's UID. Whenever that is not certain, the item is synced as a
+ * deletion plus a new item.
  */
 import { type FSWatcher, watch } from 'node:fs';
 import { mkdir, realpath, rename, rmdir, stat, writeFile } from 'node:fs/promises';
@@ -28,7 +34,17 @@ import { isFolder, isUsableName, nodeName } from '../service/entry';
 import { KationError, toKationError } from '../service/errors';
 import type { DriveSdk } from '../service/sdk';
 import type { DriveTree } from '../service/tree';
-import { conflictName, isIgnoredName, isLinkOrSpecial, type LocalItem, MARKER_NAME, moveToTrash, scanFolder, statItem } from './local';
+import {
+    conflictName,
+    isIgnoredName,
+    isLinkOrSpecial,
+    isSameLocalItem,
+    type LocalItem,
+    MARKER_NAME,
+    moveToTrash,
+    scanFolder,
+    statItem,
+} from './local';
 import { findUnmountedDisk } from './mounts';
 import { type BaseEntry, childPath, nameOf, parentOf, type SyncState } from './state';
 
@@ -69,9 +85,10 @@ export type SyncStatus = {
 export type SyncActivity = {
     /** Seconds since the epoch. */
     time: number;
-    kind: 'uploaded' | 'downloaded' | 'trashedRemote' | 'trashedLocal' | 'conflict' | 'error' | 'skipped';
+    kind: 'uploaded' | 'downloaded' | 'trashedRemote' | 'trashedLocal' | 'moved' | 'conflict' | 'error' | 'skipped';
+    /** Moved: the new path. */
     path: string;
-    /** Conflict: the path of the copy kept. Error: the error message. Skipped: why, as a code ("nameTooLong"). */
+    /** Conflict: the path of the copy kept. Moved: the previous path. Error: the error message. Skipped: why, as a code ("nameTooLong"). */
     detail: string;
 };
 
@@ -131,6 +148,8 @@ type FolderContext = {
     ensureRemote: () => Promise<NodeEntity>;
     /** The folder was deleted locally and is being restored from Proton: its absence is expected. */
     localMayBeMissing?: boolean;
+    /** The children being reconciled were listed from the server: one missing there is gone or moved. */
+    listed?: boolean;
 };
 
 /** Stops a pass and pauses sync until the user resumes it. */
@@ -148,6 +167,9 @@ class LocalChangedDuringDownload extends Error {}
 
 /** A symbolic link or special file has the name of a remote item: Kation neither follows nor replaces it. */
 class LinkInTheWay extends Error {}
+
+/** Moving an item on Proton failed for the first time: the pass is tried again before the item is synced as new. */
+class MoveFailedOnce extends Error {}
 
 /** A local folder disappeared while the pass was working in it: its parent decides what to do. */
 class LocalFolderGone extends Error {}
@@ -195,6 +217,18 @@ export class SyncEngine {
     private notFoundRetried = new Set<string>();
     /** An item was skipped in this pass for a link with its name (reason "links"). */
     private linkInTheWay = false;
+    /** Folders that could not be read when looking for moves: a missing item may be in one of them. */
+    private unreadableThisPass = new Set<string>();
+    /** Folders reconciled in this pass -> whether listed from the server. */
+    private reconciledThisPass = new Map<string, boolean>();
+    /** Counts moves applied in this pass: a folder's scan made before one may be stale. */
+    private movesThisPass = 0;
+    /** New paths whose move was given up in this pass: synced as new items. */
+    private notMoved = new Set<string>();
+    /** UIDs of the nodes this pass moved on Proton: a listing made before does not show it. */
+    private movedOnProton = new Set<string>();
+    /** Items whose move on Proton failed once; a second failure syncs them as new items. */
+    private moveRetried = new Set<string>();
     /** The sync folder's real path, resolved once per pass (see checkNoLinkAbove). */
     private realRoot?: Promise<string>;
     /** Set when the user resumes after a deletion safety pause: the next pass may delete. */
@@ -387,6 +421,11 @@ export class SyncEngine {
         this.freshFolders = new Set([...dirty].filter(([, fresh]) => fresh).map(([folder]) => folder));
         this.deletionsThisPass = 0;
         this.linkInTheWay = false;
+        this.unreadableThisPass.clear();
+        this.reconciledThisPass.clear();
+        this.movesThisPass = 0;
+        this.notMoved.clear();
+        this.movedOnProton.clear();
         this.realRoot = undefined;
         this.abort = new AbortController();
         const abort = this.abort;
@@ -407,6 +446,8 @@ export class SyncEngine {
             if (this.options.watch && this.watcher === undefined) {
                 this.startWatcher();
             }
+            // Before anything is reconciled: a moved item's old path would be synced as a deletion.
+            await this.detectLocalMoves(full ? ['/'] : folders, !!full);
             if (full) {
                 // The traversal lists folders with remote changes from the server (freshFolders),
                 // so it covers every dirty folder.
@@ -633,24 +674,24 @@ export class SyncEngine {
             if (base?.type !== 'folder') {
                 // Not synced yet: its parent decides what to do with it.
                 this.options.state.removePending(folder);
-                return this.syncFolderAt(parentOf(folder), fresh, false);
+                return this.handOffToParent(folder, fresh);
             }
             if (await this.throughLink(folder)) {
                 // Replaced here by a symbolic link, or inside one: never synced through, its parent reports it.
                 this.options.state.removePending(folder);
-                return this.syncFolderAt(parentOf(folder), fresh, false);
+                return this.handOffToParent(folder, fresh);
             }
             if (!(await this.localFolderExists(folder))) {
                 // Deleted locally: its parent trashes it as a whole, not child by child.
                 this.options.state.removePending(folder);
-                return this.syncFolderAt(parentOf(folder), fresh, false);
+                return this.handOffToParent(folder, fresh);
             }
             if (fresh) {
                 const remote = await this.getNodeOrUndefined(base.remoteUid);
                 if (!remote || remote.trashTime) {
                     // Gone remotely: the parent's listing will show it.
                     this.options.state.removePending(folder);
-                    return this.syncFolderAt(parentOf(folder), true, false);
+                    return this.handOffToParent(folder, true);
                 }
                 context = this.nodeContext(folder, remote);
             } else {
@@ -670,8 +711,19 @@ export class SyncEngine {
         }
         if (!errors.includes(folder)) {
             this.options.state.removePending(folder);
+            this.reconciledThisPass.set(folder, fresh || (this.reconciledThisPass.get(folder) ?? false));
         }
         return errors;
+    }
+
+    /** Syncs the parent of a folder that cannot be synced by itself, unless this pass already did. */
+    private handOffToParent(folder: string, fresh: boolean): Promise<string[]> {
+        const parent = parentOf(folder);
+        const listed = this.reconciledThisPass.get(parent);
+        if (listed !== undefined && (listed || !fresh)) {
+            return Promise.resolve([]);
+        }
+        return this.syncFolderAt(parent, fresh, false);
     }
 
     private checkAccount(rootUid: string): void {
@@ -688,12 +740,13 @@ export class SyncEngine {
     }
 
     private async reconcileFolder(
-        context: FolderContext,
+        folderContext: FolderContext,
         source: RemoteSource,
         fresh: boolean,
         recursive: boolean,
         errors: string[],
     ): Promise<void> {
+        const context: FolderContext = { ...folderContext, listed: source === 'list' };
         const folder = context.path;
         const base = this.options.state.children(folder);
         let local: Map<string, LocalItem>;
@@ -730,6 +783,7 @@ export class SyncEngine {
         this.abort.signal.throwIfAborted();
 
         await this.checkDeletionCount(folder, base, local, remote);
+        const movesAtScan = this.movesThisPass;
         const names = [...new Set([...base.keys(), ...local.keys(), ...remote.keys()])].sort();
         const skipped = new Set<string>();
         // Only on this side: someone else's item must not keep sync in error (an editor of a shared folder).
@@ -746,7 +800,23 @@ export class SyncEngine {
                 continue;
             }
             try {
-                await this.reconcileItem(context, itemPath, local.get(name), remote.get(name), base.get(name), fresh, recursive, errors);
+                let localItem = local.get(name);
+                let baseEntry = base.get(name);
+                let remoteItem = remote.get(name);
+                if (this.movesThisPass !== movesAtScan) {
+                    // A move since the scan may have taken this item away or brought one here.
+                    localItem = await statItem(this.absolute(itemPath));
+                    baseEntry = this.options.state.get(itemPath);
+                    if (source === 'base') {
+                        remoteItem = baseEntry && remoteItemFromBase(baseEntry);
+                    } else if (remoteItem && this.movedOnProton.has(remoteItem.uid) && baseEntry?.remoteUid !== remoteItem.uid) {
+                        // Listed before this pass moved it away on Proton.
+                        remoteItem = undefined;
+                    } else if (!remoteItem && baseEntry && this.movedOnProton.has(baseEntry.remoteUid)) {
+                        remoteItem = remoteItemFromBase(baseEntry);
+                    }
+                }
+                await this.reconcileItem(context, itemPath, localItem, remoteItem, baseEntry, fresh, recursive, errors);
             } catch (error: unknown) {
                 if (error instanceof SafetyPause) {
                     throw error;
@@ -831,14 +901,7 @@ export class SyncEngine {
         }
         if (source === 'base') {
             for (const [name, entry] of base) {
-                items.set(name, {
-                    name,
-                    type: entry.type,
-                    uid: entry.remoteUid,
-                    revision: entry.remoteRevision,
-                    sha1: entry.remoteSha1,
-                    size: entry.localSize,
-                });
+                items.set(name, remoteItemFromBase(entry));
             }
             return items;
         }
@@ -881,13 +944,32 @@ export class SyncEngine {
     private async reconcileItem(
         parent: FolderContext,
         itemPath: string,
-        local: LocalItem | undefined,
-        remote: RemoteItem | undefined,
-        base: BaseEntry | undefined,
+        localItem: LocalItem | undefined,
+        remoteItem: RemoteItem | undefined,
+        baseEntry: BaseEntry | undefined,
         fresh: boolean,
         recursive: boolean,
         errors: string[],
     ): Promise<void> {
+        let local = localItem;
+        let remote = remoteItem;
+        let base = baseEntry;
+        if (local && !remote && !base && (await this.claimLocalMove(itemPath, local))) {
+            // Renamed or moved here during the pass: it is now the synced item it was.
+            base = this.options.state.get(itemPath);
+            local = await statItem(this.absolute(itemPath));
+            remote = base && remoteItemFromBase(base);
+        } else if (remote?.node && !local && !base && (await this.followRemoteMoveTo(itemPath, remote))) {
+            base = this.options.state.get(itemPath);
+            local = await statItem(this.absolute(itemPath));
+        } else if (local?.type === base?.type && !remote && base && parent.listed && (await this.followRemoteMoveFrom(itemPath, base))) {
+            return;
+        }
+        if (!local && remote && base && this.unreadableThisPass.size > 0) {
+            // Missing here, but a folder could not be read: it may have been moved there.
+            this.logger.info(`Not deleting ${itemPath} from Proton Drive for now: a folder of the sync folder cannot be read`);
+            return;
+        }
         if (!local && !remote) {
             if (base) {
                 this.options.state.removeTree(itemPath);
@@ -944,7 +1026,7 @@ export class SyncEngine {
         if (local && remote) {
             const known = base?.type === 'folder' && base.remoteUid === remote.uid;
             if (!known) {
-                this.recordFolder(itemPath, remote.uid);
+                this.recordFolder(itemPath, remote.uid, local);
             }
             if (recursive || !known) {
                 const childFresh = fresh || !known || this.freshFolders.has(itemPath);
@@ -973,7 +1055,7 @@ export class SyncEngine {
                 // Children still have their base: unchanged ones follow the deletion, changed ones are uploaded.
                 await this.reconcileFolder(context, 'empty', true, true, errors);
                 if (recreated) {
-                    this.recordFolder(itemPath, recreated.uid);
+                    this.recordFolder(itemPath, recreated.uid, local);
                 } else {
                     this.options.state.removeTree(itemPath);
                     await rmdir(this.absolute(itemPath)).catch(() => {});
@@ -983,7 +1065,7 @@ export class SyncEngine {
             // New local folder, unless it went since its parent was scanned.
             await this.checkLocalFolder(itemPath);
             const created = await this.options.drive.createFolderIn(await parent.ensureRemote(), name);
-            this.recordFolder(itemPath, created.uid);
+            this.recordFolder(itemPath, created.uid, local);
             await this.reconcileFolder(this.nodeContext(itemPath, created), 'empty', true, true, errors);
             return;
         }
@@ -1003,13 +1085,14 @@ export class SyncEngine {
                 await this.checkRootBeforeWrite();
                 await this.checkNoLinkAbove(itemPath);
                 await mkdir(this.absolute(itemPath), { recursive: true });
+                this.recordFolder(itemPath, remote.uid, await statItem(this.absolute(itemPath)));
                 return;
             }
             // New remote folder.
             await this.checkRootBeforeWrite();
             await this.checkNoLinkAbove(itemPath);
             await mkdir(this.absolute(itemPath), { recursive: true });
-            this.recordFolder(itemPath, remote.uid);
+            this.recordFolder(itemPath, remote.uid, await statItem(this.absolute(itemPath)));
             await this.reconcileFolder(this.nodeContext(itemPath, remote.node ?? remote.uid), 'list', true, true, errors);
         }
     }
@@ -1121,6 +1204,9 @@ export class SyncEngine {
     }
 
     private async upload(parent: FolderContext, itemPath: string, local: LocalItem, existing: NodeEntity | undefined): Promise<void> {
+        if (!(await statItem(this.absolute(itemPath)))) {
+            throw Object.assign(new Error(`${itemPath} no longer exists in the sync folder`), { code: 'ENOENT' });
+        }
         this.logger.info(`Uploading ${itemPath}${existing ? ' (new version)' : ''}`);
         this.setStatus({ current: itemPath });
         const remoteParent = await parent.ensureRemote();
@@ -1203,9 +1289,17 @@ export class SyncEngine {
     }
 
     private async trashRemote(itemPath: string, remote: RemoteItem): Promise<void> {
+        const node = remote.node ?? (await this.getNodeOrUndefined(remote.uid));
+        const elsewhere =
+            node?.name.ok && (node.parentUid !== this.remoteUidOfFolder(parentOf(itemPath)) || nodeName(node) !== nameOf(itemPath));
+        if (elsewhere && !node.trashTime) {
+            // Renamed or moved on Proton since the last sync: that wins over the local deletion.
+            this.logger.info(`Not moving ${itemPath} to the Proton Drive trash: it was renamed or moved on Proton`);
+            this.markDirty(parentOf(itemPath), true);
+            return;
+        }
         this.countDeletion();
         this.logger.info(`Moving ${itemPath} to the Proton Drive trash (deleted locally)`);
-        const node = remote.node ?? (await this.getNodeOrUndefined(remote.uid));
         if (node && !node.trashTime) {
             await this.options.drive.trashNode(node);
         }
@@ -1255,6 +1349,282 @@ export class SyncEngine {
         if (this.deletionsThisPass > this.options.maxDeletionsPerPass && !this.allowMassDeletion) {
             throw this.massDeletionPause();
         }
+    }
+
+    /**
+     * Applies local renames and moves on Proton. Scans the given folders (and everything
+     * below them when `recursive`), and the new folders found in them: a new folder is
+     * often what items were moved into.
+     */
+    private async detectLocalMoves(folders: string[], recursive: boolean): Promise<void> {
+        if (this.options.state.isEmpty()) {
+            return;
+        }
+        const seen = new Set<string>();
+        const visit = async (folder: string, deep: boolean): Promise<void> => {
+            if (seen.has(folder)) {
+                return;
+            }
+            seen.add(folder);
+            this.abort.signal.throwIfAborted();
+            let local: Map<string, LocalItem>;
+            try {
+                local = await scanFolder(this.absolute(folder));
+            } catch {
+                // Reported when the folder is reconciled.
+                this.unreadableThisPass.add(folder);
+                return;
+            }
+            const base = this.options.state.children(folder);
+            for (const [name, item] of local) {
+                const itemPath = childPath(folder, name);
+                if (this.isExcluded(itemPath)) {
+                    continue;
+                }
+                const entry = base.get(name);
+                let synced = !!entry;
+                if (!entry) {
+                    synced = await this.claimLocalMove(itemPath, item);
+                } else if (!hasLocalChange(item, entry) && (entry.localIno !== item.ino || entry.localBtime !== item.btime)) {
+                    this.options.state.setLocalIdentity(itemPath, item.ino, item.btime);
+                }
+                if (item.type === 'folder' && (deep || !synced)) {
+                    await visit(itemPath, deep || !synced);
+                }
+            }
+        };
+        for (const folder of [...folders].sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))) {
+            if (!this.isExcluded(folder) && !(await this.throughLink(folder))) {
+                await visit(folder, recursive);
+            }
+        }
+    }
+
+    /** Whether the local item at `itemPath`, which has no base, is a synced item renamed or moved; then moves it on Proton too. */
+    private async claimLocalMove(itemPath: string, item: LocalItem): Promise<boolean> {
+        if (this.notMoved.has(itemPath)) {
+            return false;
+        }
+        const candidates: BaseEntry[] = [];
+        for (const entry of this.options.state.byLocalIno(item.ino)) {
+            if (
+                entry.path === itemPath ||
+                itemPath.startsWith(`${entry.path}/`) ||
+                this.isExcluded(entry.path) ||
+                !isSameLocalItem(item, entry)
+            ) {
+                continue;
+            }
+            // Still at its old path, it is a hard link. Replaced there by another item (an editor's
+            // backup copy, swapped names), the old path keeps the node: its new content is an edit.
+            if (!(await this.somethingAt(entry.path))) {
+                candidates.push(entry);
+            }
+        }
+        const [moved] = candidates;
+        let done = false;
+        if (moved && candidates.length === 1) {
+            try {
+                done = await this.applyLocalMove(moved, itemPath, item);
+            } catch (error: unknown) {
+                if (error instanceof SafetyPause || error instanceof MoveFailedOnce || PASS_ABORTING_CODES.has(toKationError(error).code)) {
+                    throw error;
+                }
+                // For example a link in the way of Proton's location: reported when the item is reconciled.
+                this.logger.warn(`Cannot follow the move of ${moved.path} (${toKationError(error).message}); syncing it as a new item`);
+            }
+        }
+        if (!done) {
+            this.notMoved.add(itemPath);
+        }
+        return done;
+    }
+
+    private async somethingAt(itemPath: string): Promise<boolean> {
+        try {
+            return !!(await statItem(this.absolute(itemPath))) || (await isLinkOrSpecial(this.absolute(itemPath)));
+        } catch {
+            return true;
+        }
+    }
+
+    /** Moves the node of `base` on Proton to `toPath`, where its local item now is. False: sync it as a new item instead. */
+    private async applyLocalMove(base: BaseEntry, toPath: string, item: LocalItem): Promise<boolean> {
+        const from = base.path;
+        const node = await this.getNodeOrUndefined(base.remoteUid);
+        if (!node || node.trashTime || !node.name.ok) {
+            return false;
+        }
+        if (node.parentUid !== this.remoteUidOfFolder(parentOf(from)) || nodeName(node) !== nameOf(from)) {
+            // Renamed or moved on Proton too: Proton's location wins, as in Proton's own apps.
+            const remotePath = await this.pathOfRemoteNode(node);
+            if (remotePath === undefined) {
+                return false;
+            }
+            if (remotePath === toPath) {
+                this.options.state.moveTree(from, toPath);
+                this.movedTree(base.type, toPath);
+                return true;
+            }
+            return this.moveLocal(toPath, remotePath, from);
+        }
+        try {
+            const destination = await this.ensureRemoteFolder(parentOf(toPath));
+            await this.options.drive.moveNode(node, destination, nameOf(toPath));
+        } catch (error: unknown) {
+            const kationError = toKationError(error);
+            if (PASS_ABORTING_CODES.has(kationError.code)) {
+                throw kationError;
+            }
+            if (kationError.code !== 'AlreadyExists' && kationError.code !== 'NotFound' && !this.moveRetried.has(from)) {
+                this.moveRetried.add(from);
+                throw new MoveFailedOnce(kationError.message, { cause: error });
+            }
+            this.logger.warn(`Cannot move ${from} to ${toPath} on Proton (${kationError.message}); syncing it as a new item`);
+            this.markDirty(parentOf(toPath), true);
+            return false;
+        }
+        this.moveRetried.delete(from);
+        this.logger.info(`Moved ${from} to ${toPath} on Proton (renamed or moved locally)`);
+        this.options.state.moveTree(from, toPath);
+        this.options.state.setLocalIdentity(toPath, item.ino, item.btime);
+        this.movedOnProton.add(base.remoteUid);
+        this.movedTree(base.type, toPath);
+        this.activity('moved', toPath, from);
+        return true;
+    }
+
+    private movedTree(type: BaseEntry['type'] | undefined, to: string): void {
+        this.movesThisPass++;
+        if (type === 'folder') {
+            // Changes waiting inside it are known by its old path: scan again (locally, no listing),
+            // and list again the folders whose remote changes were pending.
+            for (const pending of this.options.state.pending()) {
+                if (pending === to || pending.startsWith(`${to}/`)) {
+                    this.dirty.set(pending, true);
+                }
+            }
+            this.requestFullPass('local');
+        }
+    }
+
+    /** The remote folder of a local folder, created (with its parents) when the folder is new. */
+    private async ensureRemoteFolder(folder: string): Promise<NodeEntity> {
+        if (folder === '/') {
+            return this.options.tree.root();
+        }
+        const base = this.options.state.get(folder);
+        if (base?.type === 'folder') {
+            return this.options.sdk.getNode(base.remoteUid);
+        }
+        const parent = await this.ensureRemoteFolder(parentOf(folder));
+        const local = await statItem(this.absolute(folder));
+        if (local?.type !== 'folder') {
+            throw new LocalFolderGone(`${folder} no longer exists in the sync folder`);
+        }
+        const created = await this.options.drive.createFolderIn(parent, nameOf(folder));
+        this.recordFolder(folder, created.uid, local);
+        return created;
+    }
+
+    /**
+     * A remote item with no local copy at `itemPath`: when it is a synced item renamed or
+     * moved on Proton, renames the local copy instead of downloading it again.
+     */
+    private async followRemoteMoveTo(itemPath: string, remote: RemoteItem): Promise<boolean> {
+        const known = this.options.state.byRemoteUid(remote.uid);
+        if (!known || known.path === itemPath || known.type !== remote.type || this.isExcluded(known.path)) {
+            return false;
+        }
+        const old = await statItem(this.absolute(known.path)).catch(() => undefined);
+        if (old?.type !== known.type) {
+            return false;
+        }
+        return this.moveLocal(known.path, itemPath, known.path);
+    }
+
+    /**
+     * A synced item missing from its folder on Proton: when it was renamed or moved
+     * rather than deleted, the local copy follows it.
+     */
+    private async followRemoteMoveFrom(itemPath: string, base: BaseEntry): Promise<boolean> {
+        const node = await this.getNodeOrUndefined(base.remoteUid);
+        if (!node || node.trashTime) {
+            return false;
+        }
+        const remotePath = await this.pathOfRemoteNode(node);
+        if (remotePath === itemPath) {
+            // Still there after all: the listing and the node disagree (a change whose event has
+            // not arrived). Not a deletion; list again once, then report it and retry with a delay.
+            if (this.notFoundRetried.has(itemPath)) {
+                throw new Error('Proton Drive no longer lists this item in its folder, but still has it there');
+            }
+            this.notFoundRetried.add(itemPath);
+            this.markDirty(parentOf(itemPath), true);
+            return true;
+        }
+        return remotePath !== undefined && this.moveLocal(itemPath, remotePath, itemPath);
+    }
+
+    /**
+     * Renames the local item at `from` to `to`, where it is on Proton, and moves the base
+     * recorded at `baseFrom` there. False when it cannot be done: the caller syncs the
+     * item as deleted and new instead.
+     */
+    private async moveLocal(from: string, to: string, baseFrom: string): Promise<boolean> {
+        if (to === from || to.startsWith(`${from}/`)) {
+            return false;
+        }
+        await this.checkRootBeforeWrite();
+        if ((await statItem(this.absolute(to))) || (await isLinkOrSpecial(this.absolute(to)))) {
+            return false;
+        }
+        await this.checkNoLinkAbove(from);
+        await this.checkNoLinkAbove(to);
+        try {
+            await mkdir(this.absolute(parentOf(to)), { recursive: true });
+            await rename(this.absolute(from), this.absolute(to));
+        } catch (error: unknown) {
+            // For example another file system inside the sync folder (EXDEV).
+            this.logger.warn(`Cannot move ${from} to ${to} here (${toKationError(error).message}); syncing it as a new item`);
+            return false;
+        }
+        this.logger.info(`Moved ${baseFrom} to ${to} here (renamed or moved in Proton Drive)`);
+        const type = this.options.state.get(baseFrom)?.type;
+        this.options.state.moveTree(baseFrom, to);
+        this.movedTree(type, to);
+        this.activity('moved', to, baseFrom);
+        // Its new folder may already have been reconciled in this pass, or not be synced yet.
+        this.markDirty(parentOf(to), true);
+        return true;
+    }
+
+    /** The sync path of a remote node, or undefined when it is not somewhere sync can put it. */
+    private async pathOfRemoteNode(node: NodeEntity): Promise<string | undefined> {
+        const names: string[] = [];
+        let current: NodeEntity | undefined = node;
+        for (let level = 0; current && level < 256; level++) {
+            if (!current.name.ok || current.trashTime || !current.parentUid) {
+                return undefined;
+            }
+            const name = nodeName(current);
+            if (!isUsableName(name) || isIgnoredName(name) || Buffer.byteLength(name) > MAX_NAME_BYTES) {
+                return undefined;
+            }
+            names.unshift(name);
+            const parent = this.folderPathOfUid(current.parentUid);
+            if (parent !== undefined) {
+                const itemPath = names.reduce(childPath, parent);
+                return this.isExcluded(itemPath) ? undefined : itemPath;
+            }
+            // In a folder not synced yet.
+            current = await this.getNodeOrUndefined(current.parentUid);
+        }
+        return undefined;
+    }
+
+    private remoteUidOfFolder(folder: string): string | undefined {
+        return folder === '/' ? this.options.state.getMeta('rootUid') : this.options.state.get(folder)?.remoteUid;
     }
 
     private async sameContent(itemPath: string, local: LocalItem, remote: RemoteItem): Promise<boolean> {
@@ -1314,7 +1684,7 @@ export class SyncEngine {
         };
     }
 
-    private recordFolder(itemPath: string, remoteUid: string): void {
+    private recordFolder(itemPath: string, remoteUid: string, local?: LocalItem): void {
         this.options.state.put({
             path: itemPath,
             type: 'folder',
@@ -1323,6 +1693,8 @@ export class SyncEngine {
             remoteUid,
             remoteRevision: null,
             remoteSha1: null,
+            localIno: local?.ino,
+            localBtime: local?.btime,
         });
     }
 
@@ -1335,6 +1707,8 @@ export class SyncEngine {
             remoteUid: remote.uid,
             remoteRevision: remote.revision,
             remoteSha1: remote.sha1,
+            localIno: local.ino,
+            localBtime: local.btime,
         });
     }
 
@@ -1564,6 +1938,18 @@ function remoteItemFromNode(node: NodeEntity): RemoteItem {
         sha1: node.activeRevision?.claimedDigests?.sha1 ?? null,
         size: node.activeRevision?.claimedSize ?? null,
         node,
+    };
+}
+
+/** The remote item as it was after the last sync, for folders assumed unchanged on Proton. */
+function remoteItemFromBase(entry: BaseEntry): RemoteItem {
+    return {
+        name: nameOf(entry.path),
+        type: entry.type,
+        uid: entry.remoteUid,
+        revision: entry.remoteRevision,
+        sha1: entry.remoteSha1,
+        size: entry.localSize,
     };
 }
 

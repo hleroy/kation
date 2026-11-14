@@ -12,7 +12,7 @@ import path from 'node:path';
 
 import type { Logger, NodeEntity, NodeResult } from '@protontech/drive-sdk';
 
-import { type Entry, isFolder, toEntry } from './entry';
+import { type Entry, isFolder, nodeName, toEntry } from './entry';
 import { KationError, toKationError } from './errors';
 import { RateLimiter } from './rateLimiter';
 import type { DriveSdk } from './sdk';
@@ -103,25 +103,39 @@ export class DriveService {
             this.tree.invalidate(destParent.uid);
         }
 
+        await this.moveNode(node, destParent, destName);
+    }
+
+    /**
+     * Renames a node and/or moves it into `destParent`, keeping its history and links.
+     * Fails with AlreadyExists when the name is taken there.
+     */
+    async moveNode(node: NodeEntity, destParent: NodeEntity, destName: string): Promise<void> {
+        const sourceName = nodeName(node);
+        const sourceParentUid = node.parentUid;
         try {
-            if (destParent.uid === sourceParent.uid) {
-                await this.sdk.renameNode(node, destName);
+            if (destParent.uid === sourceParentUid) {
+                if (destName !== sourceName) {
+                    await this.sdk.renameNode(node, destName);
+                }
             } else if (destName === sourceName || !(await this.tree.child(destParent, sourceName))) {
                 // Move first, then rename in the destination folder.
                 await this.checkResults(this.sdk.moveNodes([node], destParent));
                 if (destName !== sourceName) {
                     await this.sdk.renameNode(node.uid, destName);
                 }
-            } else if (!(await this.tree.child(sourceParent, destName))) {
+            } else if (!sourceParentUid || !(await this.tree.child(await this.sdk.getNode(sourceParentUid), destName))) {
                 // The destination folder already has a child with the source name:
                 // rename in the source folder first, then move.
                 await this.sdk.renameNode(node, destName);
                 await this.checkResults(this.sdk.moveNodes([node.uid], destParent));
             } else {
-                throw new KationError('AlreadyExists', `Name conflict while moving to ${destination}`);
+                throw new KationError('AlreadyExists', `Name conflict while moving ${sourceName}`);
             }
         } finally {
-            this.tree.invalidate(sourceParent.uid);
+            if (sourceParentUid) {
+                this.tree.invalidate(sourceParentUid);
+            }
             this.tree.invalidate(destParent.uid);
         }
     }

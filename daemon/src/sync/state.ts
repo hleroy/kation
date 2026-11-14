@@ -23,6 +23,9 @@ export type BaseEntry = {
     /** Active revision UID; files only. */
     remoteRevision: string | null;
     remoteSha1: string | null;
+    /** Inode and birth time (ms) of the local item, to recognise it after a rename or move; null when not recorded yet. */
+    localIno?: number | null;
+    localBtime?: number | null;
 };
 
 type Row = {
@@ -33,6 +36,8 @@ type Row = {
     remote_uid: string;
     remote_revision: string | null;
     remote_sha1: string | null;
+    local_ino: number | null;
+    local_btime: number | null;
 };
 
 export function parentOf(path: string): string {
@@ -68,6 +73,19 @@ export class SyncState {
             remote_revision TEXT,
             remote_sha1 TEXT
         )`);
+        const columns = new Set(
+            this.db
+                .query<{ name: string }, []>('PRAGMA table_info(entries)')
+                .all()
+                .map((column) => column.name),
+        );
+        if (!columns.has('local_ino')) {
+            this.db.run('ALTER TABLE entries ADD COLUMN local_ino INTEGER');
+        }
+        if (!columns.has('local_btime')) {
+            this.db.run('ALTER TABLE entries ADD COLUMN local_btime REAL');
+        }
+        this.db.run('CREATE INDEX IF NOT EXISTS entries_local_ino ON entries (local_ino)');
         this.db.run('CREATE INDEX IF NOT EXISTS entries_parent ON entries (parent)');
         this.db.run('CREATE INDEX IF NOT EXISTS entries_remote_uid ON entries (remote_uid)');
         this.db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -96,11 +114,47 @@ export class SyncState {
         return row ? fromRow(row) : undefined;
     }
 
+    /** Synced items with this inode: normally one, more with hard links or after an inode was reused. */
+    byLocalIno(ino: number): BaseEntry[] {
+        return this.db.query<Row, [number]>('SELECT * FROM entries WHERE local_ino = ?').all(ino).map(fromRow);
+    }
+
+    setLocalIdentity(path: string, ino: number, btime: number): void {
+        this.db.query('UPDATE entries SET local_ino = ?, local_btime = ? WHERE path = ?').run(ino, btime, path);
+    }
+
+    /** Moves an entry and everything below it to another path, replacing whatever was recorded there. */
+    moveTree(from: string, to: string): void {
+        const prefix = `${from}/`;
+        this.db.transaction(() => {
+            this.removeTree(to);
+            const rows = this.db
+                .query<{ path: string }, [string, string, string]>(
+                    'SELECT path FROM entries WHERE path = ? OR substr(path, 1, length(?)) = ?',
+                )
+                .all(from, prefix, prefix);
+            const update = this.db.query('UPDATE entries SET path = ?, parent = ? WHERE path = ?');
+            for (const row of rows) {
+                const moved = to + row.path.slice(from.length);
+                update.run(moved, parentOf(moved), row.path);
+            }
+            const pending = this.db
+                .query<{ path: string }, [string, string, string]>(
+                    'SELECT path FROM pending WHERE path = ? OR substr(path, 1, length(?)) = ?',
+                )
+                .all(from, prefix, prefix);
+            for (const row of pending) {
+                this.removePending(row.path);
+                this.addPending(to + row.path.slice(from.length));
+            }
+        })();
+    }
+
     put(entry: BaseEntry): void {
         this.db
             .query(
-                `INSERT OR REPLACE INTO entries (path, parent, type, local_size, local_mtime, remote_uid, remote_revision, remote_sha1)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                `INSERT OR REPLACE INTO entries (path, parent, type, local_size, local_mtime, remote_uid, remote_revision, remote_sha1, local_ino, local_btime)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .run(
                 entry.path,
@@ -111,13 +165,15 @@ export class SyncState {
                 entry.remoteUid,
                 entry.remoteRevision,
                 entry.remoteSha1,
+                entry.localIno ?? null,
+                entry.localBtime ?? null,
             );
     }
 
     /** Removes an entry and everything below it. */
     removeTree(path: string): void {
         const prefix = path === '/' ? '/' : `${path}/`;
-        this.db.query('DELETE FROM entries WHERE path = ? OR substr(path, 1, ?) = ?').run(path, prefix.length, prefix);
+        this.db.query('DELETE FROM entries WHERE path = ? OR substr(path, 1, length(?)) = ?').run(path, prefix, prefix);
     }
 
     /** Whether any entry exists (i.e. something was synced before). */
@@ -191,5 +247,7 @@ function fromRow(row: Row): BaseEntry {
         remoteUid: row.remote_uid,
         remoteRevision: row.remote_revision,
         remoteSha1: row.remote_sha1,
+        localIno: row.local_ino,
+        localBtime: row.local_btime,
     };
 }

@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { chmod, lstat, mkdir, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, link, lstat, mkdir, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { DriveEventType, NodeType } from '@protontech/drive-sdk';
@@ -498,6 +498,59 @@ describe('SyncEngine', () => {
         expect(child(ctx.fake, ctx.fake.rootUid, 'a.txt')).toBeUndefined();
         expect(ctx.fake.contentOf(child(ctx.fake, ctx.fake.rootUid, 'b.txt')!.uid)).toBe('b');
         expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('does not announce the upload of a file that vanished since its folder was scanned', async () => {
+        const log: string[] = [];
+        const logger = {
+            ...silentLogger,
+            info: (message: string) => {
+                log.push(message);
+                if (message === 'Uploading /a.txt') {
+                    rmSync(ctx.local('b.txt'));
+                }
+            },
+        };
+        const ctx = await setup({ logger });
+        await ctx.engine.start();
+        await ctx.settle();
+        await edit(ctx.local('a.txt'), 'a');
+        await edit(ctx.local('b.txt'), 'b');
+        ctx.engine.onLocalChange('/a.txt');
+        await ctx.settle();
+
+        expect(log.filter((line) => !line.startsWith('Sync pass'))).toEqual([
+            'Uploading /a.txt',
+            '/b.txt was removed here during sync; checking again',
+        ]);
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('checks the parent of several vanished folders once per pass', async () => {
+        const ctx = await setup();
+        for (const name of ['x', 'y', 'z']) {
+            await mkdir(ctx.local(`A/${name}`), { recursive: true });
+        }
+        await ctx.engine.start();
+        await ctx.settle();
+
+        const synced: string[] = [];
+        const internals = ctx.engine as unknown as { syncFolderAt: (folder: string, ...rest: unknown[]) => Promise<string[]> };
+        const original = internals.syncFolderAt.bind(ctx.engine);
+        internals.syncFolderAt = (folder, ...rest) => {
+            synced.push(folder);
+            return original(folder, ...rest);
+        };
+        // Without Drive events: the trash request's own event would start a second pass.
+        ctx.stop();
+        await rm(ctx.local('A'), { recursive: true });
+        for (const name of ['x', 'y', 'z']) {
+            ctx.engine.onLocalChange(`/A/${name}/file.txt`);
+        }
+        await ctx.settle();
+
+        expect(synced.filter((folder) => folder === '/')).toEqual(['/']);
+        expect(child(ctx.fake, ctx.fake.rootUid, 'A')).toBeUndefined();
     });
 
     it('syncs new folder trees in both directions', async () => {
@@ -1384,5 +1437,407 @@ describe('the sync pass log line', () => {
             `INFO Sync pass: changes, folders ${folders.slice(0, 10).join(', ')}, … (+1 more)`,
             `DEBUG All folders of the pass: ${folders.join(', ')}`,
         ]);
+    });
+});
+
+describe('SyncEngine renames and moves', () => {
+    async function synced() {
+        const activity: string[] = [];
+        const ctx = await setup({ onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`.trim()) });
+        const docs = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Docs', type: NodeType.Folder });
+        const file = ctx.fake.add({ parentUid: docs.uid, name: 'a.txt', type: NodeType.File, content: 'v1' });
+        const other = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Other', type: NodeType.Folder });
+        await ctx.engine.start();
+        await ctx.settle();
+        activity.length = 0;
+        return { ...ctx, activity, docs, file, other };
+    }
+
+    it('renames a file on Proton when it is renamed here', async () => {
+        const ctx = await synced();
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Docs/b.txt'));
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        ctx.engine.onLocalChange('/Docs/b.txt');
+        await ctx.settle();
+
+        expect([...ctx.fake.childrenOf(ctx.docs.uid).keys()]).toEqual(['b.txt']);
+        expect(ctx.file).toMatchObject({ name: 'b.txt', revision: 1 });
+        expect(ctx.file.trashed).toBeUndefined();
+        expect(ctx.activity).toEqual(['moved /Docs/b.txt /Docs/a.txt']);
+        expect(ctx.state.get('/Docs/a.txt')).toBeUndefined();
+        expect(ctx.state.get('/Docs/b.txt')?.remoteUid).toBe(ctx.file.uid);
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('moves a file on Proton when it is moved to another folder here, found by a full scan', async () => {
+        const ctx = await synced();
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Other/renamed.txt'));
+        ctx.engine.syncNow();
+        await ctx.settle();
+
+        expect(ctx.file).toMatchObject({ name: 'renamed.txt', parentUid: ctx.other.uid, revision: 1 });
+        expect(ctx.file.trashed).toBeUndefined();
+        expect(ctx.activity).toEqual(['moved /Other/renamed.txt /Docs/a.txt']);
+    });
+
+    it('renames a folder on Proton with everything in it, uploading nothing', async () => {
+        const ctx = await synced();
+        await rename(ctx.local('Docs'), ctx.local('Papers'));
+        ctx.engine.onLocalChange('/Docs');
+        ctx.engine.onLocalChange('/Papers');
+        await ctx.settle();
+
+        expect(ctx.docs.name).toBe('Papers');
+        expect(ctx.docs.trashed).toBeUndefined();
+        expect(ctx.file).toMatchObject({ parentUid: ctx.docs.uid, revision: 1 });
+        expect(ctx.activity).toEqual(['moved /Papers /Docs']);
+        expect(ctx.state.get('/Papers/a.txt')?.remoteUid).toBe(ctx.file.uid);
+        expect(ctx.state.get('/Docs/a.txt')).toBeUndefined();
+    });
+
+    it('uploads a new version of the same file when it is renamed and edited', async () => {
+        const ctx = await synced();
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Docs/b.txt'));
+        await edit(ctx.local('Docs/b.txt'), 'v2 longer');
+        ctx.engine.onLocalChange('/Docs/b.txt');
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.settle();
+
+        expect(ctx.file.name).toBe('b.txt');
+        expect(ctx.fake.contentOf(ctx.file.uid)).toBe('v2 longer');
+        expect(ctx.fake.childrenOf(ctx.docs.uid).size).toBe(1);
+        expect(ctx.activity).toEqual(['moved /Docs/b.txt /Docs/a.txt', 'uploaded /Docs/b.txt']);
+    });
+
+    it('moves a file into a folder created here at the same time', async () => {
+        const ctx = await synced();
+        await mkdir(ctx.local('Archive/2026'), { recursive: true });
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Archive/2026/a.txt'));
+        await writeFile(ctx.local('Archive/2026/new.txt'), 'new');
+        ctx.engine.onLocalChange('/Archive');
+        ctx.engine.onLocalChange('/Archive/2026');
+        ctx.engine.onLocalChange('/Archive/2026/a.txt');
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.settle();
+
+        const archive = child(ctx.fake, ctx.fake.rootUid, 'Archive')!;
+        const year = child(ctx.fake, archive.uid, '2026')!;
+        expect(ctx.file).toMatchObject({ parentUid: year.uid, revision: 1 });
+        expect(ctx.file.trashed).toBeUndefined();
+        expect([...ctx.fake.childrenOf(year.uid).keys()].sort()).toEqual(['a.txt', 'new.txt']);
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('uploads a copy or a hard link as a new file', async () => {
+        const ctx = await synced();
+        await link(ctx.local('Docs/a.txt'), ctx.local('Docs/linked.txt'));
+        await copyFile(ctx.local('Docs/a.txt'), ctx.local('Docs/copy.txt'));
+        ctx.engine.onLocalChange('/Docs/linked.txt');
+        await ctx.settle();
+
+        expect(ctx.file.name).toBe('a.txt');
+        expect([...ctx.fake.childrenOf(ctx.docs.uid).keys()].sort()).toEqual(['a.txt', 'copy.txt', 'linked.txt']);
+        expect(ctx.activity.filter((line) => line.startsWith('moved'))).toEqual([]);
+    });
+
+    it('keeps the same file on Proton when an editor replaces it by renaming a new file over it', async () => {
+        const ctx = await synced();
+        await edit(ctx.local('Docs/a.txt.new'), 'v2 saved');
+        await rename(ctx.local('Docs/a.txt.new'), ctx.local('Docs/a.txt'));
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.settle();
+
+        expect(ctx.fake.contentOf(ctx.file.uid)).toBe('v2 saved');
+        expect(ctx.fake.childrenOf(ctx.docs.uid).size).toBe(1);
+    });
+
+    it('keeps the file on Proton at its name when an editor renames it as a backup and writes a new one', async () => {
+        const ctx = await synced();
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Docs/a.txt.bak'));
+        await edit(ctx.local('Docs/a.txt'), 'v2 saved');
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.settle();
+
+        expect(ctx.file.name).toBe('a.txt');
+        expect(ctx.fake.contentOf(ctx.file.uid)).toBe('v2 saved');
+        expect(ctx.fake.contentOf(child(ctx.fake, ctx.docs.uid, 'a.txt.bak')!.uid)).toBe('v1');
+        expect(ctx.activity.filter((line) => line.startsWith('moved'))).toEqual([]);
+    });
+
+    it('syncs a file renamed over the old name of another renamed file as an edit', async () => {
+        const ctx = await synced();
+        await edit(ctx.local('Docs/draft.txt'), 'draft');
+        ctx.engine.onLocalChange('/Docs/draft.txt');
+        await ctx.settle();
+        ctx.activity.length = 0;
+
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Docs/backup.txt'));
+        await rename(ctx.local('Docs/draft.txt'), ctx.local('Docs/a.txt'));
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.settle();
+
+        expect((await readdir(ctx.local('Docs'))).sort()).toEqual(['a.txt', 'backup.txt']);
+        expect(await readFile(ctx.local('Docs/a.txt'), 'utf8')).toBe('draft');
+        expect(await readFile(ctx.local('Docs/backup.txt'), 'utf8')).toBe('v1');
+        expect([...ctx.fake.childrenOf(ctx.docs.uid).keys()].sort()).toEqual(['a.txt', 'backup.txt']);
+        expect(ctx.fake.contentOf(ctx.file.uid)).toBe('draft');
+        expect(ctx.activity.filter((line) => /^(downloaded|trashedLocal|moved)/.test(line))).toEqual([]);
+        expect(await ctx.trashed()).toEqual([]);
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    for (const fresh of [false, true]) {
+        it(`follows a rename made here once the pass has started${fresh ? ', in a folder listed from Proton' : ''}`, async () => {
+            const ctx = await synced();
+            const internals = ctx.engine as unknown as { detectLocalMoves: (...args: unknown[]) => Promise<void> };
+            const original = internals.detectLocalMoves.bind(ctx.engine);
+            let renamed = false;
+            internals.detectLocalMoves = async (...args) => {
+                await original(...args);
+                if (!renamed) {
+                    renamed = true;
+                    await rename(ctx.local('Docs/a.txt'), ctx.local('Docs/0early.txt'));
+                }
+            };
+            if (fresh) {
+                ctx.fake.remoteChange({ type: DriveEventType.NodeUpdated, uid: ctx.file.uid });
+            } else {
+                ctx.engine.onLocalChange('/Docs/a.txt');
+            }
+            await ctx.settle();
+
+            expect(await readdir(ctx.local('Docs'))).toEqual(['0early.txt']);
+            expect([...ctx.fake.childrenOf(ctx.docs.uid).keys()]).toEqual(['0early.txt']);
+            expect(ctx.file.trashed).toBeUndefined();
+            expect(ctx.activity).toEqual(['moved /Docs/0early.txt /Docs/a.txt']);
+            expect(await ctx.trashed()).toEqual([]);
+            expect(ctx.state.get('/Docs/a.txt')).toBeUndefined();
+            expect(ctx.engine.getStatus().state).toBe('idle');
+        });
+    }
+
+    it('still syncs other changes when a move cannot be followed because of a link', async () => {
+        const ctx = await synced();
+        await rm(ctx.local('Other'), { recursive: true });
+        await symlink(await tempDir(), ctx.local('Other'));
+        // Without Drive events: only the local changes are looked at.
+        ctx.stop();
+        for await (const result of ctx.fake.sdk.moveNodes([ctx.file.uid], ctx.other.uid)) {
+            expect(result.ok).toBe(true);
+        }
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Docs/b.txt'));
+        await edit(ctx.local('Docs/new.txt'), 'new');
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.settle();
+
+        expect(ctx.fake.contentOf(child(ctx.fake, ctx.docs.uid, 'new.txt')!.uid)).toBe('new');
+        expect(ctx.file.trashed).toBeUndefined();
+        expect(await readFile(ctx.local('Docs/b.txt'), 'utf8')).toBe('v1');
+    });
+
+    it('trashes on Proton a file moved out of the sync folder', async () => {
+        const ctx = await synced();
+        await rename(ctx.local('Docs/a.txt'), path.join(await tempDir(), 'a.txt'));
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.settle();
+        expect(ctx.file.trashed).toBeDefined();
+    });
+
+    it('syncs the item as new when its new name is already taken on Proton', async () => {
+        const ctx = await synced();
+        ctx.fake.add({ parentUid: ctx.docs.uid, name: 'b.txt', type: NodeType.File, content: 'v1' });
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Docs/b.txt'));
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.settle();
+
+        expect(ctx.file.trashed).toBeDefined();
+        expect(await readFile(ctx.local('Docs/b.txt'), 'utf8')).toBe('v1');
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('recognises renames after an upgrade from a state without inodes', async () => {
+        const ctx = await synced();
+        ctx.state.setLocalIdentity('/Docs/a.txt', null as unknown as number, null as unknown as number);
+        ctx.engine.syncNow();
+        await ctx.settle();
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Docs/b.txt'));
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.settle();
+        expect(ctx.file).toMatchObject({ name: 'b.txt' });
+        expect(ctx.file.trashed).toBeUndefined();
+    });
+
+    for (const [title, from, to] of [
+        ['renamed to a later name', 'a.txt', 'z.txt'],
+        ['renamed to an earlier name', 'a.txt', '0.txt'],
+    ] as const) {
+        it(`renames the local file, without a download, when it is ${title} on Proton`, async () => {
+            const ctx = await synced();
+            const inode = (await stat(ctx.local('Docs/a.txt'))).ino;
+            await ctx.fake.sdk.renameNode(ctx.file.uid, to);
+            await ctx.settle();
+
+            expect(await readdir(ctx.local('Docs'))).toEqual([to]);
+            expect((await stat(ctx.local(`Docs/${to}`))).ino).toBe(inode);
+            expect(await ctx.trashed()).toEqual([]);
+            expect(ctx.activity).toEqual([`moved /Docs/${to} /Docs/${from}`]);
+            expect(ctx.state.get(`/Docs/${to}`)?.remoteUid).toBe(ctx.file.uid);
+            expect(ctx.engine.getStatus().state).toBe('idle');
+        });
+    }
+
+    for (const [title, source, destination] of [
+        ['to a later folder', 'Docs', 'Other'],
+        ['to an earlier folder', 'Other', 'Docs'],
+    ] as const) {
+        it(`moves the local folder, with a file not synced yet, when it is moved ${title} on Proton`, async () => {
+            const ctx = await synced();
+            const parents = { Docs: ctx.docs, Other: ctx.other };
+            const sub = ctx.fake.add({ parentUid: parents[source].uid, name: 'Sub', type: NodeType.Folder });
+            ctx.fake.add({ parentUid: sub.uid, name: 'in.txt', type: NodeType.File, content: 'in' });
+            ctx.fake.remoteChange({ type: DriveEventType.NodeCreated, uid: sub.uid });
+            await ctx.settle();
+            ctx.activity.length = 0;
+            await edit(ctx.local(`${source}/Sub/mine.txt`), 'mine');
+
+            for await (const result of ctx.fake.sdk.moveNodes([sub.uid], parents[destination].uid)) {
+                expect(result.ok).toBe(true);
+            }
+            await ctx.settle();
+
+            expect((await readdir(ctx.local(`${destination}/Sub`))).sort()).toEqual(['in.txt', 'mine.txt']);
+            expect(await readdir(ctx.local(source))).not.toContain('Sub');
+            expect(await ctx.trashed()).toEqual([]);
+            expect(ctx.activity.filter((line) => line.startsWith('downloaded'))).toEqual([]);
+            expect([...ctx.fake.childrenOf(sub.uid).keys()].sort()).toEqual(['in.txt', 'mine.txt']);
+        });
+    }
+
+    it('moves the local file into a folder created on Proton at the same time', async () => {
+        const ctx = await synced();
+        const archive = ctx.fake.add({ parentUid: ctx.other.uid, name: 'Archive', type: NodeType.Folder });
+        for await (const result of ctx.fake.sdk.moveNodes([ctx.file.uid], archive.uid)) {
+            expect(result.ok).toBe(true);
+        }
+        ctx.fake.remoteChange({ type: DriveEventType.NodeCreated, uid: archive.uid });
+        await ctx.settle();
+
+        expect(await readFile(ctx.local('Other/Archive/a.txt'), 'utf8')).toBe('v1');
+        expect(await readdir(ctx.local('Docs'))).toEqual([]);
+        expect(await ctx.trashed()).toEqual([]);
+        expect(ctx.activity.filter((line) => line.startsWith('downloaded'))).toEqual([]);
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('uploads a local edit as a new version of a file renamed on Proton', async () => {
+        const ctx = await synced();
+        await edit(ctx.local('Docs/a.txt'), 'v2 local');
+        await ctx.fake.sdk.renameNode(ctx.file.uid, 'b.txt');
+        await ctx.settle();
+
+        expect(await readdir(ctx.local('Docs'))).toEqual(['b.txt']);
+        expect(ctx.fake.contentOf(ctx.file.uid)).toBe('v2 local');
+        expect(ctx.fake.childrenOf(ctx.docs.uid).size).toBe(1);
+    });
+
+    it('lets Proton win when a file is renamed differently on both sides', async () => {
+        const ctx = await synced();
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Docs/local.txt'));
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.fake.sdk.renameNode(ctx.file.uid, 'remote.txt');
+        await ctx.settle();
+
+        expect(await readdir(ctx.local('Docs'))).toEqual(['remote.txt']);
+        expect([...ctx.fake.childrenOf(ctx.docs.uid).keys()]).toEqual(['remote.txt']);
+        expect(ctx.file.trashed).toBeUndefined();
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('keeps on Proton a file deleted here but renamed there, and brings it back', async () => {
+        const ctx = await synced();
+        // Renamed on Proton, its event not received yet.
+        ctx.stop();
+        ctx.file.name = 'b.txt';
+        await rm(ctx.local('Docs/a.txt'));
+        ctx.engine.onLocalChange('/Docs/a.txt');
+        await ctx.settle();
+
+        expect(ctx.file.trashed).toBeUndefined();
+        expect(await readFile(ctx.local('Docs/b.txt'), 'utf8')).toBe('v1');
+        expect(ctx.activity).toEqual(['downloaded /Docs/b.txt']);
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('keeps both when a file replaced by a folder here is renamed on Proton', async () => {
+        const ctx = await synced();
+        await rm(ctx.local('Docs/a.txt'));
+        await mkdir(ctx.local('Docs/a.txt'));
+        await writeFile(ctx.local('Docs/a.txt/inner.txt'), 'inner');
+        await ctx.fake.sdk.renameNode(ctx.file.uid, 'b.txt');
+        await ctx.settle();
+
+        expect(ctx.file.trashed).toBeUndefined();
+        expect(await readFile(ctx.local('Docs/b.txt'), 'utf8')).toBe('v1');
+        expect(await readFile(ctx.local('Docs/a.txt/inner.txt'), 'utf8')).toBe('inner');
+        expect([...ctx.fake.childrenOf(ctx.docs.uid).keys()].sort()).toEqual(['a.txt', 'b.txt']);
+    });
+
+    it('reports an item that Proton no longer lists but still has, without trashing it or listing in a loop', async () => {
+        const ctx = await synced();
+        ctx.stop();
+        ctx.file.trashed = new Date();
+        const getNode = ctx.sdk.getNode;
+        ctx.sdk.getNode = async (nodeOrUid) => {
+            const node = await getNode(nodeOrUid);
+            return node.uid === ctx.file.uid ? { ...node, trashTime: undefined } : node;
+        };
+        const before = ctx.listings();
+        ctx.engine.onRemoteEvent({
+            type: DriveEventType.NodeUpdated,
+            nodeUid: ctx.file.uid,
+            parentNodeUid: ctx.docs.uid,
+        } as Parameters<SyncEngine['onRemoteEvent']>[0]);
+        await untilError(ctx.engine);
+        await Bun.sleep(100);
+
+        expect(ctx.engine.getStatus().state).toBe('error');
+        expect(ctx.listings() - before).toBe(2);
+        expect(await readdir(ctx.local('Docs'))).toEqual(['a.txt']);
+        expect(await ctx.trashed()).toEqual([]);
+    });
+
+    it('trashes the local file when it is moved into an excluded folder on Proton', async () => {
+        const ctx = await synced();
+        await ctx.engine.stop();
+        const again = await setup({ fake: ctx.fake, root: ctx.root, excluded: ['/Other'] });
+        await again.engine.start();
+        await again.settle();
+        for await (const result of ctx.fake.sdk.moveNodes([ctx.file.uid], ctx.other.uid)) {
+            expect(result.ok).toBe(true);
+        }
+        again.engine.onRemoteEvent({ type: DriveEventType.TreeRefresh } as Parameters<SyncEngine['onRemoteEvent']>[0]);
+        await again.settle();
+        expect(await readdir(again.local('Docs'))).toEqual([]);
+        expect(await again.trashed()).toEqual(['a.txt']);
+    });
+
+    it('does not delete from Proton while a folder cannot be read', async () => {
+        const ctx = await synced();
+        await mkdir(ctx.local('Locked'));
+        ctx.engine.onLocalChange('/Locked');
+        await ctx.settle();
+        await rename(ctx.local('Docs/a.txt'), ctx.local('Locked/a.txt'));
+        await chmod(ctx.local('Locked'), 0o000);
+        try {
+            ctx.engine.syncNow();
+            await untilError(ctx.engine);
+            expect(ctx.file.trashed).toBeUndefined();
+        } finally {
+            await chmod(ctx.local('Locked'), 0o755);
+        }
+        ctx.engine.syncNow();
+        await ctx.settle();
+        expect(ctx.file.trashed).toBeUndefined();
+        expect(ctx.file.parentUid).toBe(child(ctx.fake, ctx.fake.rootUid, 'Locked')!.uid);
     });
 });

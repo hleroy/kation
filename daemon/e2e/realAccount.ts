@@ -582,6 +582,35 @@ async function main(): Promise<number> {
         }
     });
 
+    await step('E2E-23', 'A local rename and move keep the file on Proton', async () => {
+        await waitIdle();
+        const link = await call<string>('GetShareLink', `protondrive:${remote('Activity/a.txt')}`, true);
+        const offset = await logSize();
+        await mkdir(local('Moved'), { recursive: true });
+        await rename(local('Activity/a.txt'), local('Moved/renamed.txt'));
+        await waitFor('Moved/renamed.txt on Proton', () => remoteExists(remote('Moved/renamed.txt')), LOCAL_TIMEOUT_MS);
+        await waitFor('Activity/a.txt gone from Proton', async () => !(await remoteExists(remote('Activity/a.txt'))), LOCAL_TIMEOUT_MS);
+        await waitIdle();
+        const after = await call<string>('GetShareLink', `protondrive:${remote('Moved/renamed.txt')}`, false);
+        assert(after === link, 'the public link did not follow the file: it was uploaded as a new file');
+        const logged = await logSince(offset);
+        assert(!logged.includes(`Uploading ${remote('Moved/renamed.txt')}`), 'the renamed file was uploaded again');
+    });
+
+    await step('E2E-24', 'A rename on Proton renames the local file', async () => {
+        await waitIdle();
+        const inode = (await stat(local('Moved/renamed.txt'))).ino;
+        const offset = await logSize();
+        await call('Move', remote('Moved/renamed.txt'), remote('Moved/from-proton.txt'), false);
+        await waitFor('Moved/from-proton.txt locally', async () => existsSync(local('Moved/from-proton.txt')), REMOTE_TIMEOUT_MS);
+        await waitIdle();
+        assert(!existsSync(local('Moved/renamed.txt')), 'the old name is still there');
+        assert((await stat(local('Moved/from-proton.txt'))).ino === inode, 'the local file was replaced, not renamed');
+        assert(!(await trashed('renamed.txt')), 'the local file went to the desktop Trash');
+        const logged = await logSince(offset);
+        assert(!logged.includes(`Downloading ${remote('Moved/from-proton.txt')}`), 'the renamed file was downloaded again');
+    });
+
     await step('E2E-17', 'Starts with the session (systemd user unit enabled and active)', async () => {
         if (options['fake-drive']) {
             throw new Skip('not applicable to the fake drive');

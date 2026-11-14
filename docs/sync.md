@@ -24,8 +24,13 @@ directions. It is off until you turn it on in the Kation window.
   reads or writes through them. If one has the same name as an item in
   Proton Drive, that item is not synced either until you rename or remove
   the link. The sync folder itself can be a symbolic link.
-- Renaming or moving a file is synced as a new file plus a deletion, so the
-  file is transferred again.
+- Renaming or moving a file or folder, on your computer or in Proton Drive,
+  renames or moves it on the other side: nothing is transferred again, and
+  the file keeps its version history and its public link. If it was renamed
+  or moved differently on both sides, Proton Drive's name and place win.
+- A few moves are still synced as a deletion plus a new file: into or out of
+  the sync folder or a folder you chose not to sync, to a name already taken
+  on the other side, and files whose names you swapped.
 
 ## Deletions and conflicts
 

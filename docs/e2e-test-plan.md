@@ -94,6 +94,8 @@ Exit code 0 means everything passed.
 | E2E-20 | Sync states for Dolphin's emblems: synced, paused while paused, nothing outside the folder |
 | E2E-21 | Public link of a test file: none at first, created on request, the same when asked with the local path; web app address. The link stops working when the test folder is trashed |
 | E2E-22 | A 512 KiB/s download limit slows a 2 MiB download to about 4 s; the previous limits are restored |
+| E2E-23 | A file renamed and moved locally is renamed and moved on Proton: its public link still works and nothing is uploaded again |
+| E2E-24 | A file renamed on Proton is renamed locally, not downloaded again |
 
 Notes for reading results:
 

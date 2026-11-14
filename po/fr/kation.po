@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kation 0.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-12 21:33+0100\n"
+"POT-Creation-Date: 2026-11-14 19:36+0100\n"
 "PO-Revision-Date: 2026-11-01 23:30+0100\n"
 "Last-Translator: Kation contributors\n"
 "Language-Team: French <kde-francophone@kde.org>\n"
@@ -43,6 +43,12 @@ msgstr "%1 : mis dans la corbeille de Proton Drive"
 msgctxt "recent activity"
 msgid "Moved %1 to the Trash"
 msgstr "%1 : mis dans la corbeille"
+
+#: kde/app/tray.cpp
+#, kde-format
+msgctxt "recent activity"
+msgid "Renamed or moved %1"
+msgstr "%1 : renommé ou déplacé"
 
 #: kde/app/tray.cpp
 #, kde-format
