@@ -8,15 +8,9 @@ import { PassSessionStore } from './passCredentialsStore';
 import { SecretsSessionStore } from './secretCredentialsStore';
 
 export type { Credentials } from './credentials';
-export type { CredentialsStore } from './interface';
 
-// Kation: optional wrapper around the store, used to report keyring problems.
-export function initCredentials(
-    config: Config,
-    logger: Logger,
-    wrapStore: (store: CredentialsStore) => CredentialsStore = (store) => store,
-): Credentials {
-    const credentialsStore = wrapStore(createAuthSessionStore(config, logger));
+export function initCredentials(config: Config, logger: Logger): Credentials {
+    const credentialsStore = createAuthSessionStore(config, logger);
     return new Credentials(credentialsStore, logger);
 }
 

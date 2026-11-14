@@ -28,8 +28,11 @@ the user; ask them to type `! <command>`.
 
 ## Rules
 
-- **Never reformat `daemon/src/proton/`** (copied from the Proton Drive CLI, MIT) or
-  `third_party/`. Biome excludes `src/proton/`; keep it that way so upstream merges
+- **Never edit or reformat `daemon/src/proton/`** (copied from the Proton Drive CLI,
+  MIT) or `third_party/`. The copy is upstream plus `kation.patch` (two constants);
+  ctest's `proton-copy` fails on any other difference. Adapt on Kation's side instead.
+  To move to a newer CLI release, follow `daemon/src/proton/README.md`.
+  Biome excludes `src/proton/`; keep it that way so upstream merges
   stay simple.
 - **D-Bus contract:** the interface XML documents every method, signal and map key.
   Change it together with `daemon/src/service/dbusServer.ts` and

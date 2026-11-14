@@ -17,6 +17,8 @@ repos:
     hooks:
       - id: trailing-whitespace
         args: ['--markdown-linebreak-ext=md']
+        # A blank context line of a patch is a single space.
+        exclude: \.patch$
       - id: end-of-file-fixer
       - id: mixed-line-ending
         args: ['--fix=lf']

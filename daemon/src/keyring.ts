@@ -3,8 +3,11 @@
 
 import type { Logger } from '@protontech/drive-sdk';
 
-import type { CredentialsStore } from './proton/credentials';
-import type { Credentials as StoredCredentials } from './proton/credentials/interface';
+import { type Config, CredentialsStoreType } from './config';
+import { PlaintextFileSessionStore } from './proton/credentials/fileCredentialsStore';
+import type { CredentialsStore, Credentials as StoredCredentials } from './proton/credentials/interface';
+import { PassSessionStore } from './proton/credentials/passCredentialsStore';
+import { SecretsSessionStore } from './proton/credentials/secretCredentialsStore';
 import { KationError } from './service/errors';
 import type { Problem } from './service/session';
 
@@ -54,6 +57,28 @@ export class ReportingStore implements CredentialsStore {
         } catch (error: unknown) {
             this.logger.warn(`Failed to remove the session from the keyring: ${errorMessage(error)}`);
         }
+    }
+}
+
+/**
+ * The session store chosen in the configuration, wrapped in a `ReportingStore`.
+ * Same choice as `createAuthSessionStore` in `proton/credentials/index.ts`,
+ * which cannot wrap the store.
+ */
+export function createSessionStore(config: Config, logger: Logger): ReportingStore {
+    return new ReportingStore(innerStore(config, logger), logger);
+}
+
+function innerStore(config: Config, logger: Logger): CredentialsStore {
+    switch (config.credentialsStore) {
+        case CredentialsStoreType.UnsafeFile:
+            return new PlaintextFileSessionStore(config.appDir, logger);
+        case CredentialsStoreType.Pass:
+            return new PassSessionStore(logger);
+        case CredentialsStoreType.Keychain:
+            return new SecretsSessionStore(logger);
+        default:
+            throw new Error(`Invalid credentials store: ${config.credentialsStore}`);
     }
 }
 

@@ -13,7 +13,7 @@
 
 import { type DriveEvent, DriveEventType, type Logger, type ProtonDriveClient } from '@protontech/drive-sdk';
 
-import type { EventsProvider } from './proton/events';
+import type { EventsProvider } from './proton/events/interface';
 
 /** Same rate as the SDK uses for your own volume. */
 const POLL_INTERVAL_MS = 30 * 1000;

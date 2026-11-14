@@ -7,7 +7,8 @@ import { type DriveEvent, DriveEventType } from '@protontech/drive-sdk';
 import { getMockLogger } from '@protontech/drive-sdk/tests/logger';
 
 import { EventPoller, type EventsSdk } from '../src/events';
-import { MemoryEventsProvider, NoEventsProvider } from '../src/proton/events';
+import { MemoryEventsProvider } from '../src/proton/events/providerMemory';
+import { NoEventsProvider } from '../src/proton/events/providerNoEvents';
 
 type Call = { scope: string; lastEventId?: string; signal?: AbortSignal };
 type Reply = DriveEvent[] | Error | 'hang';
