@@ -158,8 +158,8 @@ from E2E-06 and the `Old` folder from E2E-11 are there (or the whole
    Ask also whether a notification "Signed out of Proton Drive" appeared,
    and whether the tray icon changed (grey "×" badge).
 3. Ask the tester to sign in again in the window. Then
-   `grep "Sync pass" ~/.local/state/kation/kationd.log | tail -1` should end
-   with `full (local)` (sync resumed, no full re-listing).
+   `grep "Sync pass" ~/.local/state/kation/kationd.log | tail -1` should contain
+   `full (local)` (sync resumed, no full re-listing).
 
 ### M5. System Settings (TESTER)
 
@@ -263,7 +263,7 @@ Collect, without changing anything:
 
 ```sh
 grep -E "SetSync|Sync pass|Sync paused|Sync resumed|Uploading|Downloading|Resuming|Start at login|session|ERROR|WARNING" \
-  ~/.local/state/kation/kationd.log | grep -v '^{' | tail -60
+  ~/.local/state/kation/kationd.log | tail -60
 kationd sync --json
 kationd status --json
 ```

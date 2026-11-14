@@ -113,9 +113,31 @@ Logs stay on your computer; Kation sends no telemetry.
 
 Environment variables for `kationd`:
 
-- `KATION_LOG_LEVEL`: `DEBUG`, `INFO` (default), `WARNING` or `ERROR`.
+- `KATION_LOG_LEVEL`: `DEBUG`, `INFO` (default), `WARNING` or `ERROR`. `DEBUG` adds
+  the Proton SDK's details: each API call, block transfers and metrics.
 - `KATION_CREDENTIALS_STORE`: `keychain` (default), `pass`, or
   `unsafe_file` (plaintext, for tests only).
+
+`kationd` runs as a systemd user service, so a variable set in a terminal does not
+reach it. To get a `DEBUG` log, for a bug report for example:
+
+```sh
+mkdir -p ~/.config/systemd/user/kationd.service.d
+printf '[Service]\nEnvironment=KATION_LOG_LEVEL=DEBUG\n' \
+  > ~/.config/systemd/user/kationd.service.d/debug.conf
+systemctl --user daemon-reload
+systemctl --user restart kationd.service
+```
+
+Reproduce the problem, then go back to the default level:
+
+```sh
+rm ~/.config/systemd/user/kationd.service.d/debug.conf
+systemctl --user daemon-reload
+systemctl --user restart kationd.service
+```
+
+The log holds the names of your files and folders: read it before sharing it.
 
 ## Contributing
 
