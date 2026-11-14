@@ -124,6 +124,7 @@ const ACTIVITY_LABELS: Record<string, string> = {
     downloaded: 'Downloaded',
     trashedRemote: 'Moved to the Proton Drive trash',
     trashedLocal: 'Moved to the desktop Trash',
+    moved: 'Renamed or moved',
     conflict: 'Conflict, kept both',
     error: 'Could not sync',
     skipped: 'Not synced',

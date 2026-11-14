@@ -9,6 +9,8 @@ import {
     conflictName,
     isIgnoredName,
     isLinkOrSpecial,
+    isSameLocalItem,
+    type LocalItem,
     moveToTopDirTrash,
     moveToTrash,
     removeResumableParts,
@@ -18,6 +20,26 @@ import { childPath, nameOf, parentOf, SyncState } from '../src/sync/state';
 import { tempDir } from './helpers';
 
 describe('local helpers', () => {
+    it('recognises a renamed item by its inode, but not a reused inode', () => {
+        const file: LocalItem = { name: 'b.txt', type: 'file', size: 3, mtime: 1000, ino: 7, btime: 500 };
+        const base = { type: 'file' as const, localSize: 3, localMtime: 1000, localIno: 7, localBtime: 500 };
+        expect(isSameLocalItem(file, base)).toBe(true);
+        expect(isSameLocalItem({ ...file, size: 9, mtime: 2000 }, base)).toBe(true);
+        expect(isSameLocalItem({ ...file, btime: 0 }, { ...base, localBtime: 0 })).toBe(true);
+        // Another file that got the inode of a deleted one.
+        expect(isSameLocalItem({ ...file, size: 9, mtime: 2000, btime: 900 }, base)).toBe(false);
+        expect(isSameLocalItem({ ...file, size: 9, btime: 0 }, { ...base, localBtime: 0 })).toBe(false);
+        expect(isSameLocalItem({ ...file, ino: 8 }, base)).toBe(false);
+        expect(isSameLocalItem(file, { ...base, localIno: null })).toBe(false);
+        expect(isSameLocalItem({ ...file, type: 'folder' }, base)).toBe(false);
+
+        const folder: LocalItem = { name: 'B', type: 'folder', size: 0, mtime: 1, ino: 7, btime: 500 };
+        const folderBase = { type: 'folder' as const, localSize: null, localMtime: null, localIno: 7, localBtime: 500 };
+        expect(isSameLocalItem(folder, folderBase)).toBe(true);
+        expect(isSameLocalItem({ ...folder, btime: 900 }, folderBase)).toBe(false);
+        expect(isSameLocalItem(folder, { ...folderBase, localBtime: null })).toBe(true);
+    });
+
     it('ignores temporary, lock and system files', () => {
         for (const name of [
             'a.kation-part',

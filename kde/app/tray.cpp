@@ -47,6 +47,9 @@ QString activityText(const QVariantMap &activity)
     if (kind == QLatin1String("trashedLocal")) {
         return i18nc("recent activity", "Moved %1 to the Trash", name);
     }
+    if (kind == QLatin1String("moved")) {
+        return i18nc("recent activity", "Renamed or moved %1", name);
+    }
     if (kind == QLatin1String("conflict")) {
         return i18nc("recent activity", "Kept both versions of %1", name);
     }
@@ -66,6 +69,9 @@ QString activityIcon(const QString &kind)
     }
     if (kind == QLatin1String("trashedRemote") || kind == QLatin1String("trashedLocal")) {
         return QStringLiteral("user-trash");
+    }
+    if (kind == QLatin1String("moved")) {
+        return QStringLiteral("edit-rename");
     }
     if (kind == QLatin1String("conflict")) {
         return QStringLiteral("document-duplicate");

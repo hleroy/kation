@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kation 0.3.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-12 21:39+0100\n"
+"POT-Creation-Date: 2026-11-14 19:36+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -45,6 +45,12 @@ msgstr ""
 #, kde-format
 msgctxt "recent activity"
 msgid "Moved %1 to the Trash"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgctxt "recent activity"
+msgid "Renamed or moved %1"
 msgstr ""
 
 #: kde/app/tray.cpp

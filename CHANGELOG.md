@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - An About tab with the versions of Kation, its background service, the Proton Drive SDK, Qt, KDE Frameworks and the system (and a button that copies them for bug reports), the log file, links and licenses.
 
+- Sync recognises renames and moves, of files and folders, on the computer and on Proton Drive: the item is renamed or moved on the other side instead of being deleted and transferred again, so it keeps its version history and public link. Recent activity lists them.
+
 ### Changed
 
 - The log keeps Proton SDK details (each API call, block uploads, timings) for `KATION_LOG_LEVEL=DEBUG`, so a large upload no longer pushes days of history out of it; upload tokens are masked.
@@ -18,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A folder deleted locally while it is being uploaded is noticed as soon as sync reaches its next item, and moved to the Proton Drive trash as a whole; sync no longer keeps creating its subfolders on Proton or trashes its items one by one.
+- Sync does not delete anything from Proton Drive while a folder of the sync folder cannot be read: a file missing elsewhere may have been moved into it.
+- A file or folder deleted locally after it was renamed or moved on Proton Drive is no longer moved to the Proton trash: the rename or move wins, and the item comes back at its new place.
+- The sync state of the items inside a folder whose name has an emoji is removed with the folder.
+- Several folders deleted locally at once are checked in one go instead of once each, and no upload is logged for a file that is already gone.
 - The log says that a file "was removed here during sync" when it vanishes locally, instead of a warning that it "changed on Proton".
 
 ## [0.3.0] - 2026-11-11
