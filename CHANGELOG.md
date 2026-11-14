@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The log keeps Proton SDK details (each API call, block uploads, timings) for `KATION_LOG_LEVEL=DEBUG`, so a large upload no longer pushes days of history out of it; upload tokens are masked.
 
+### Fixed
+
+- A folder deleted locally while it is being uploaded is noticed as soon as sync reaches its next item, and moved to the Proton Drive trash as a whole; sync no longer keeps creating its subfolders on Proton or trashes its items one by one.
+- The log says that a file "was removed here during sync" when it vanishes locally, instead of a warning that it "changed on Proton".
+
 ## [0.3.0] - 2026-11-11
 
 ### TL;DR
