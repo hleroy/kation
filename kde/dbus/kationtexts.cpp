@@ -3,6 +3,7 @@
 
 #include "kationtexts.h"
 
+#include <KFormat>
 #include <KLocalizedString>
 
 QString Kation::syncReasonText(const QVariantMap &syncStatus)
@@ -35,6 +36,9 @@ QString Kation::syncReasonText(const QVariantMap &syncStatus)
     if (reason == QLatin1String("items")) {
         return i18n("Some items could not be synced.");
     }
+    if (reason == QLatin1String("storageFull")) {
+        return i18n("Your Proton Drive storage is full: files you add or change are not uploaded.");
+    }
     if (reason == QLatin1String("links")) {
         return i18n(
             "A symbolic link in the sync folder has the same name as an item in Proton Drive. Kation does not sync symbolic links, so that item is not "
@@ -65,4 +69,65 @@ QString Kation::problemText(const QVariantMap &status)
         return status.value(QStringLiteral("problem")).toString();
     }
     return detail.isEmpty() ? text : i18nc("@info a problem, then the error behind it", "%1 (%2)", text, detail);
+}
+
+bool Kation::uploadsRefused(const QVariantMap &syncStatus, bool before)
+{
+    if (syncStatus.value(QStringLiteral("reason")).toString() == QLatin1String("storageFull")) {
+        return true;
+    }
+    const QString state = syncStatus.value(QStringLiteral("state")).toString();
+    return before && (state == QLatin1String("syncing") || state == QLatin1String("paused"));
+}
+
+Kation::StorageLevel Kation::storageLevel(const QVariantMap &status, bool uploadsRefused)
+{
+    if (uploadsRefused) {
+        return StorageLevel::Full;
+    }
+    const int percent = storagePercent(status);
+    if (percent < 0) {
+        return StorageLevel::Unknown;
+    }
+    return percent >= 100 ? StorageLevel::Full : percent >= almostFullPercent ? StorageLevel::AlmostFull : StorageLevel::Ok;
+}
+
+int Kation::storagePercent(const QVariantMap &status)
+{
+    const qint64 used = status.value(QStringLiteral("storageUsed"), -1).toLongLong();
+    const qint64 max = status.value(QStringLiteral("storageMax"), -1).toLongLong();
+    if (used < 0 || max <= 0) {
+        return -1;
+    }
+    return static_cast<int>(used * 100 / max);
+}
+
+QString Kation::storageUsageText(const QVariantMap &status)
+{
+    const int percent = storagePercent(status);
+    if (percent < 0) {
+        return {};
+    }
+    const KFormat format;
+    return i18nc("@info storage: used, total, percentage used",
+                 "%1 of %2 used (%3%)",
+                 format.formatByteSize(status.value(QStringLiteral("storageUsed")).toDouble()),
+                 format.formatByteSize(status.value(QStringLiteral("storageMax")).toDouble()),
+                 percent);
+}
+
+QString Kation::storageWarningText(StorageLevel level)
+{
+    switch (level) {
+    case StorageLevel::AlmostFull:
+        return i18n("Your Proton Drive storage is almost full. Once it is full, files you add or change are no longer uploaded.");
+    case StorageLevel::Full:
+        return i18n(
+            "Your Proton Drive storage is full: files you add or change are not uploaded. Free up space (files in the Proton Drive trash count too) or get "
+            "more storage.");
+    case StorageLevel::Unknown:
+    case StorageLevel::Ok:
+        break;
+    }
+    return {};
 }

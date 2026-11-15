@@ -71,6 +71,9 @@ describe('D-Bus contract', () => {
             problem: 'Kation cannot use your keyring (locked)',
             problemCode: 'keyring',
             problemDetail: 'locked',
+            storageUsed: 1024,
+            storageMax: 5 * 1024 ** 3,
+            storageUrl: 'https://account.proton.me/drive/dashboard',
         });
         expect(signatures(encoded)).toEqual({
             loggedIn: 'b',
@@ -82,7 +85,16 @@ describe('D-Bus contract', () => {
             problem: 's',
             problemCode: 's',
             problemDetail: 's',
+            storageUsed: 'x',
+            storageMax: 'x',
+            storageUrl: 's',
         });
+    });
+
+    it('documents every status key, sync reason and error code', () => {
+        for (const key of ['storageUsed x', 'storageMax x', 'storageUrl s', '"storageFull"', 'QuotaExceeded']) {
+            expect(interfaceXml).toContain(key);
+        }
     });
 
     it('encodes the sync status with the documented keys and types', () => {

@@ -5,6 +5,7 @@ import type { Logger } from '@protontech/drive-sdk';
 
 import { KationError, toKationError } from './errors';
 import type { Account } from './sdk';
+import type { Storage } from './storage';
 
 export type Status = {
     loggedIn: boolean;
@@ -19,6 +20,11 @@ export type Status = {
     problemCode: '' | Problem['code'];
     /** The underlying error, or "". */
     problemDetail: string;
+    /** Drive storage in bytes, -1 when unknown (or signed out). */
+    storageUsed: number;
+    storageMax: number;
+    /** Proton's web page showing the account's storage and plans. */
+    storageUrl: string;
 };
 
 /** Why Kation cannot work right now. */
@@ -44,6 +50,8 @@ export type SessionHooks = {
     problem?: () => Problem | undefined;
     /** Runs when the session ends without a sign-out (e.g. Proton rejected it). */
     sessionLost?: () => Promise<void>;
+    /** Current storage, if known. */
+    storage?: () => Storage | undefined;
 };
 
 export const SESSION_LOST_MESSAGE = 'Your Proton session ended (it expired or was signed out elsewhere). Sign in again to continue.';
@@ -64,7 +72,7 @@ export class Session {
 
     constructor(
         private readonly account: Account,
-        private readonly versions: { appVersion: string; sdkVersion: string },
+        private readonly info: { appVersion: string; sdkVersion: string; storageUrl?: string },
         private readonly logger: Logger,
         private readonly hooks: SessionHooks = {},
     ) {}
@@ -135,15 +143,20 @@ export class Session {
         const sessionLost: Problem | undefined =
             this.sessionLost && !this.account.isLoggedIn() ? { code: 'sessionLost', message: SESSION_LOST_MESSAGE, detail: '' } : undefined;
         const problem = this.hooks.problem?.() ?? sessionLost;
+        const storage = this.account.isLoggedIn() ? this.hooks.storage?.() : undefined;
         return {
             loggedIn: this.account.isLoggedIn(),
             email: this.account.isLoggedIn() ? this.email : '',
             loginPending: !!this.pending,
             signInUrl: this.pending?.resolvedUrl ?? '',
-            ...this.versions,
+            appVersion: this.info.appVersion,
+            sdkVersion: this.info.sdkVersion,
             problem: problem?.message ?? '',
             problemCode: problem?.code ?? '',
             problemDetail: problem?.detail ?? '',
+            storageUsed: storage?.used ?? -1,
+            storageMax: storage?.max ?? -1,
+            storageUrl: this.info.storageUrl ?? '',
         };
     }
 
@@ -226,7 +239,8 @@ export class Session {
         }
     }
 
-    private notifyStatus(): void {
+    /** Emits the status, for changes made outside the session (e.g. the storage). */
+    notifyStatus(): void {
         this.hooks.statusChanged?.(this.status());
     }
 }

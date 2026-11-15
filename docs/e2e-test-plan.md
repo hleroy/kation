@@ -96,6 +96,7 @@ Exit code 0 means everything passed.
 | E2E-22 | A 512 KiB/s download limit slows a 2 MiB download to about 4 s; the previous limits are restored |
 | E2E-23 | A file renamed and moved locally is renamed and moved on Proton: its public link still works and nothing is uploaded again |
 | E2E-24 | A file renamed on Proton is renamed locally, not downloaded again |
+| E2E-25 | The status reports the account's Drive storage and its storage page; the storage used grows after a 1 MiB upload |
 
 Notes for reading results:
 
@@ -120,8 +121,11 @@ screenshot it. Expected:
 
 - A window with four tabs: **General**, **Folders to Sync**, **Network and
   Startup**, **About**. General shows "Signed in" with the test account
-  email, a Folder Sync section saying "Up to date. Last synced …", the italic
-  third-party notice, and **Open Synced Folder**. Nothing is cut off.
+  email, a **Storage** bar with "… of … used (…%)" matching the storage shown
+  in the Proton Drive web app, a Folder Sync section saying "Up to date. Last
+  synced …", the italic third-party notice, and **Open Synced Folder**.
+  Nothing is cut off. **Manage Storage** opens the Proton account's storage
+  page in the browser.
 - **About** shows the installed version for Kation and the background
   service, without a scroll bar; **Copy Version Info** copies the versions
   as plain text.
@@ -137,7 +141,8 @@ Verify: `ls ~/.config/autostart/com.hleroy.Kation.tray.desktop` exists.
 Ask the tester to:
 
 1. Open Dolphin → Network → **Proton Drive (online)**: their files are
-   listed.
+   listed, and the status bar shows the free space of their Proton Drive
+   (with the status bar's space information turned on).
 2. Open a PDF or image from there: it opens.
 3. Drag a small file from their computer into a folder there, and drag one
    out.
@@ -207,7 +212,8 @@ Clean up: trash the folder with
 ### M7. Tray menu and notifications (TESTER)
 
 1. Ask the tester to open the tray icon's menu. Expected: a status line
-   ("Up to date"), **Open Synced Folder**, **Open Online View**, **Pause
+   ("Up to date"), a storage line ("Storage: … of … used (…%)", also in the
+   icon's tooltip), **Open Synced Folder**, **Open Online View**, **Pause
    Sync**, **Sync Now**, **Recent Activity** (listing recent uploads and
    downloads, e.g. from M6), **Settings…**, **Quit**.
 2. Ask them to click **Pause Sync**: the icon shows a grey pause badge and

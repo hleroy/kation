@@ -237,6 +237,11 @@ export class SyncController {
         this.engine.syncNow();
     }
 
+    /** Retries failed items now instead of after the backoff (e.g. space was freed). */
+    retryNow(): void {
+        this.engine?.retryNow();
+    }
+
     onRemoteEvent(event: DriveEvent): void {
         this.engine?.onRemoteEvent(event);
     }

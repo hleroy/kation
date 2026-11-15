@@ -10,6 +10,7 @@
 #include "kationtexts.h"
 #include "kationweb.h"
 
+#include <QLocale>
 #include <QTest>
 
 #include <clocale>
@@ -25,6 +26,7 @@ private Q_SLOTS:
     void syncReasons();
     void safetyPause();
     void problems();
+    void storage();
     void french();
     void webUrls_data();
     void webUrls();
@@ -61,6 +63,7 @@ void KationTextsTest::syncReasons_data()
     QTest::newRow("links") << with(u"links"_s)
                            << u"A symbolic link in the sync folder has the same name as an item in Proton Drive. Kation does not sync symbolic links, so "
                               u"that item is not synced either: rename or remove the link."_s;
+    QTest::newRow("storageFull") << with(u"storageFull"_s) << u"Your Proton Drive storage is full: files you add or change are not uploaded."_s;
     QTest::newRow("error from Proton") << with(QString()) << u"English message"_s;
     QTest::newRow("newer reason") << with(u"somethingNew"_s) << u"English message"_s;
 }
@@ -95,6 +98,48 @@ void KationTextsTest::problems()
     QCOMPARE(Kation::problemText({{u"problemCode"_s, u"somethingNew"_s}, {u"problem"_s, u"English"_s}}), u"English"_s);
 }
 
+void KationTextsTest::storage()
+{
+    constexpr qint64 GiB = 1024LL * 1024 * 1024;
+    auto status = [](qint64 used, qint64 max) {
+        return QVariantMap{{u"storageUsed"_s, used}, {u"storageMax"_s, max}};
+    };
+    using Kation::StorageLevel;
+    QCOMPARE(Kation::storageLevel({}), StorageLevel::Unknown);
+    QCOMPARE(Kation::storageLevel(status(-1, -1)), StorageLevel::Unknown);
+    QCOMPARE(Kation::storageLevel(status(5, 0)), StorageLevel::Unknown);
+    QCOMPARE(Kation::storageLevel(status(89, 100)), StorageLevel::Ok);
+    QCOMPARE(Kation::storageLevel(status(90, 100)), StorageLevel::AlmostFull);
+    QCOMPARE(Kation::storageLevel(status(100, 100)), StorageLevel::Full);
+    QCOMPARE(Kation::storageLevel(status(120, 100)), StorageLevel::Full);
+    // Proton refused a file larger than the space left.
+    QCOMPARE(Kation::storageLevel(status(50, 100), true), StorageLevel::Full);
+    QCOMPARE(Kation::storageLevel({}, true), StorageLevel::Full);
+
+    // A refusal holds while the next pass retries or sync is paused, until a pass ends without it.
+    auto sync = [](const QString &state, const QString &reason = {}) {
+        return QVariantMap{{u"state"_s, state}, {u"reason"_s, reason}};
+    };
+    QVERIFY(Kation::uploadsRefused(sync(u"error"_s, u"storageFull"_s), false));
+    QVERIFY(Kation::uploadsRefused(sync(u"syncing"_s), true));
+    QVERIFY(Kation::uploadsRefused(sync(u"paused"_s, u"user"_s), true));
+    QVERIFY(!Kation::uploadsRefused(sync(u"syncing"_s), false));
+    QVERIFY(!Kation::uploadsRefused(sync(u"idle"_s), true));
+    QVERIFY(!Kation::uploadsRefused(sync(u"error"_s, u"items"_s), true));
+    QVERIFY(!Kation::uploadsRefused(sync(u"disabled"_s), true));
+
+    QCOMPARE(Kation::storagePercent(status(GiB * 3 / 2, 5 * GiB)), 30);
+    QCOMPARE(Kation::storagePercent(status(-1, -1)), -1);
+    QCOMPARE(Kation::storageUsageText(status(-1, -1)), QString());
+    const QString usage = Kation::storageUsageText(status(GiB * 3 / 2, 5 * GiB));
+    // Sizes follow the locale's number format.
+    QVERIFY2(usage.startsWith(QLocale().toString(1.5, 'f', 1)) && usage.contains(u" of "_s) && usage.endsWith(u" used (30%)"_s), qPrintable(usage));
+
+    QVERIFY(Kation::storageWarningText(StorageLevel::AlmostFull).contains(u"almost full"_s));
+    QVERIFY(Kation::storageWarningText(StorageLevel::Full).contains(u"trash"_s));
+    QCOMPARE(Kation::storageWarningText(StorageLevel::Ok), QString());
+}
+
 void KationTextsTest::french()
 {
     if (!qEnvironmentVariable("LANGUAGE").startsWith(u"fr"_s)) {
@@ -104,6 +149,8 @@ void KationTextsTest::french()
     QCOMPARE(Kation::syncReasonText({{u"reason"_s, u"signedOut"_s}}), u"Connectez-vous pour synchroniser."_s);
     QCOMPARE(Kation::syncReasonText({{u"reason"_s, u"deletions"_s}, {u"deletionLimit"_s, 100u}}),
              u"Plus de 100 éléments seraient supprimés d'un coup. Vérifiez le dossier synchronisé, puis reprenez la synchronisation pour continuer."_s);
+    const QString usage = Kation::storageUsageText({{u"storageUsed"_s, 30}, {u"storageMax"_s, 100}});
+    QVERIFY2(usage.endsWith(u" utilisés (30\u00A0%)"_s), qPrintable(usage));
 }
 
 void KationTextsTest::webUrls_data()

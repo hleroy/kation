@@ -23,6 +23,7 @@ export type ErrorCode =
     | 'Connection'
     | 'Integrity'
     | 'Cancelled'
+    | 'QuotaExceeded'
     | 'Failed';
 
 export const ERROR_PREFIX = 'com.hleroy.Kation.Error.';
@@ -64,6 +65,9 @@ export function toKationError(error: unknown): KationError {
     if (error instanceof IntegrityError || error instanceof DecryptionError) {
         return new KationError('Integrity', message, options);
     }
+    if (isQuotaExceeded(error)) {
+        return new KationError('QuotaExceeded', message, options);
+    }
     if (isProtonNotFound(error)) {
         return new KationError('NotFound', message, options);
     }
@@ -82,6 +86,15 @@ function isProtonNotFound(error: unknown): boolean {
     return (
         error instanceof ValidationError && (error.name === 'NotFoundAPIError' || (error as { code?: unknown }).code === PROTON_NOT_EXISTS)
     );
+}
+
+/**
+ * Proton's "not enough storage" API errors (INSUFFICIENT_QUOTA, INSUFFICIENT_SPACE and
+ * INSUFFICIENT_VOLUME_QUOTA in the SDK's internal errorCodes.ts), ValidationErrors.
+ */
+const PROTON_QUOTA_CODES = new Set([200001, 200002, 200100]);
+function isQuotaExceeded(error: unknown): boolean {
+    return error instanceof ValidationError && PROTON_QUOTA_CODES.has((error as { code?: unknown }).code as number);
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

@@ -34,3 +34,10 @@ Name[fr]=Déconnecté par Proton
 Comment=The Proton session ended and you need to sign in again
 Comment[fr]=La session Proton a pris fin et vous devez vous reconnecter
 Action=Popup
+
+[Event/storage]
+Name=Proton Drive storage almost full or full
+Name[fr]=Stockage Proton Drive presque plein ou plein
+Comment=The Proton Drive storage reached 90% of its limit, or files are no longer uploaded because it is full
+Comment[fr]=Le stockage Proton Drive a atteint 90 % de sa limite, ou les fichiers ne sont plus envoyés car il est plein
+Action=Popup

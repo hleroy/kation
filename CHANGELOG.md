@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Sync recognises renames and moves, of files and folders, on the computer and on Proton Drive: the item is renamed or moved on the other side instead of being deleted and transferred again, so it keeps its version history and public link. Recent activity lists them.
 
+- Proton Drive storage: the Kation window, the tray menu and tooltip, Dolphin's status bar (online view) and `kationd status` show the space used, with a notification when the storage reaches 90% and when it is full. A full account is reported as such: sync stops uploading (but keeps downloading), Recent Activity shows it once instead of once per file, and uploads resume by themselves when space is freed.
+
 ### Changed
 
 - The log keeps Proton SDK details (each API call, block uploads, timings) for `KATION_LOG_LEVEL=DEBUG`, so a large upload no longer pushes days of history out of it; upload tokens are masked.

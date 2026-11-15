@@ -80,6 +80,9 @@ export function statusToDbus(status: Status): Record<string, dbus.Variant> {
         problem: new Variant('s', status.problem),
         problemCode: new Variant('s', status.problemCode),
         problemDetail: new Variant('s', status.problemDetail),
+        storageUsed: new Variant('x', status.storageUsed),
+        storageMax: new Variant('x', status.storageMax),
+        storageUrl: new Variant('s', status.storageUrl),
     };
 }
 

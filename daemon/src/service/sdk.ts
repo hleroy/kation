@@ -3,6 +3,8 @@
 
 import type { ProtonDriveClient } from '@protontech/drive-sdk';
 
+import type { Storage } from './storage';
+
 /** The part of the Drive SDK client that Kation uses. Narrow so tests can fake it. */
 export type DriveSdk = Pick<
     ProtonDriveClient,
@@ -30,6 +32,8 @@ export interface Account {
     loadSession(): Promise<void>;
     /** Primary address of the signed-in user. */
     getEmail(): Promise<string>;
+    /** Drive storage of the signed-in user (see driveStorageOf). */
+    getStorage(): Promise<Storage>;
     /** Browser sign-in. Calls onSignInUrl once the URL is known, resolves when signed in. */
     authViaWeb(onSignInUrl: (url: string) => void, signal: AbortSignal): Promise<void>;
     /** Revokes the session on the server (best effort) and deletes local session data. */

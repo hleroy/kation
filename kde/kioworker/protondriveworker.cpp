@@ -23,6 +23,7 @@
 #include <QStandardPaths>
 #include <QUuid>
 
+#include <algorithm>
 #include <limits>
 #include <sys/stat.h>
 
@@ -166,6 +167,25 @@ KIO::WorkerResult ProtonDriveWorker::stat(const QUrl &url)
         uds.replace(KIO::UDSEntry::UDS_DISPLAY_NAME, i18n("My files"));
     }
     statEntry(uds);
+    return KIO::WorkerResult::pass();
+}
+
+KIO::WorkerResult ProtonDriveWorker::fileSystemFreeSpace(const QUrl &url)
+{
+    qCDebug(KATION_KIO) << "fileSystemFreeSpace" << url;
+    QDBusPendingReply<QVariantMap> reply = m_drive->GetStatus();
+    reply.waitForFinished();
+    if (reply.isError()) {
+        return toWorkerResult(reply.error(), url);
+    }
+    const qint64 used = reply.value().value(QStringLiteral("storageUsed"), -1).toLongLong();
+    const qint64 max = reply.value().value(QStringLiteral("storageMax"), -1).toLongLong();
+    if (used < 0 || max <= 0) {
+        return KIO::WorkerResult::fail(KIO::ERR_UNSUPPORTED_ACTION, url.toDisplayString());
+    }
+    // The metadata FileSystemFreeSpaceJob reads, as kio_file sets it.
+    setMetaData(QStringLiteral("total"), QString::number(max));
+    setMetaData(QStringLiteral("available"), QString::number(std::max<qint64>(0, max - used)));
     return KIO::WorkerResult::pass();
 }
 

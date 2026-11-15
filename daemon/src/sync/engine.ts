@@ -61,7 +61,7 @@ export type SyncPhase = 'disabled' | 'idle' | 'syncing' | 'paused' | 'error';
  * not synced because a symbolic link or special file in the sync folder has
  * their name), or "" (none of these: see message).
  */
-export type SyncReason = '' | 'user' | 'deletions' | 'folder' | 'notMounted' | 'account' | 'signedOut' | 'items' | 'links';
+export type SyncReason = '' | 'user' | 'deletions' | 'folder' | 'notMounted' | 'account' | 'signedOut' | 'items' | 'links' | 'storageFull';
 
 /** Default for SyncEngineOptions.maxDeletionsPerPass. */
 export const DEFAULT_MAX_DELETIONS_PER_PASS = 100;
@@ -217,6 +217,10 @@ export class SyncEngine {
     private notFoundRetried = new Set<string>();
     /** An item was skipped in this pass for a link with its name (reason "links"). */
     private linkInTheWay = false;
+    /** Proton refused an upload in this pass for lack of space: later uploads of the pass are not tried. */
+    private storageFull = false;
+    /** The full storage was reported in recent activity; once until a pass ends without it. */
+    private storageFullReported = false;
     /** Folders that could not be read when looking for moves: a missing item may be in one of them. */
     private unreadableThisPass = new Set<string>();
     /** Folders reconciled in this pass -> whether listed from the server. */
@@ -321,6 +325,18 @@ export class SyncEngine {
         this.requestFullPass('local');
     }
 
+    /** Runs the retry that is waiting for its backoff now (e.g. storage space was freed). */
+    retryNow(): void {
+        if (this.stopped || this.paused) {
+            return;
+        }
+        // During a pass: if it fails, its retry comes after the shortest backoff.
+        this.retryDelayMs = 0;
+        if (this.timer) {
+            this.schedule(0);
+        }
+    }
+
     /** Resolves when no work is pending or running. For tests and shutdown. */
     whenIdle(): Promise<void> {
         const nothingToDo = this.dirty.size === 0 && !this.fullPass;
@@ -421,6 +437,7 @@ export class SyncEngine {
         this.freshFolders = new Set([...dirty].filter(([, fresh]) => fresh).map(([folder]) => folder));
         this.deletionsThisPass = 0;
         this.linkInTheWay = false;
+        this.storageFull = false;
         this.unreadableThisPass.clear();
         this.reconciledThisPass.clear();
         this.movesThisPass = 0;
@@ -479,15 +496,18 @@ export class SyncEngine {
             }
             this.retryDelayMs = Math.min(Math.max(this.retryDelayMs * 2, 5000), MAX_RETRY_DELAY_MS);
             const message = this.status.message;
-            const reason: SyncReason = message ? '' : this.linkInTheWay ? 'links' : 'items';
+            const reason: SyncReason = this.storageFull ? 'storageFull' : message ? '' : this.linkInTheWay ? 'links' : 'items';
+            this.storageFullReported &&= this.storageFull;
             this.setStatus({
                 state: 'error',
                 current: '',
                 message:
-                    message ||
-                    (reason === 'links'
-                        ? 'A symbolic link in the sync folder has the name of an item in Proton Drive; rename or remove it to sync that item'
-                        : 'Some items could not be synced'),
+                    reason === 'storageFull'
+                        ? 'Your Proton Drive storage is full: files are not uploaded until space is freed'
+                        : message ||
+                          (reason === 'links'
+                              ? 'A symbolic link in the sync folder has the name of an item in Proton Drive; rename or remove it to sync that item'
+                              : 'Some items could not be synced'),
                 reason,
             });
             this.schedule(this.retryDelayMs);
@@ -496,6 +516,7 @@ export class SyncEngine {
 
         this.retryDelayMs = 0;
         this.allowMassDeletion = false;
+        this.storageFullReported = false;
         if (this.dirty.size === 0) {
             this.notFoundRetried.clear();
         }
@@ -853,17 +874,25 @@ export class SyncEngine {
                     continue;
                 }
                 const linked = error instanceof LinkInTheWay;
+                const full = kationError.code === 'QuotaExceeded';
                 if (linked) {
                     this.logger.warn(`Not syncing ${itemPath}: ${kationError.message}`);
                     this.linkInTheWay = true;
+                } else if (full) {
+                    this.logger.warn(`Not uploading ${itemPath}: ${kationError.message}`);
+                    this.storageFull = true;
                 } else {
                     this.logger.error(`Failed to sync ${itemPath}`, error);
                     this.status.message = `${itemPath}: ${kationError.message}`;
                 }
                 if (!this.failedItems.has(itemPath)) {
                     this.failedItems.add(itemPath);
-                    // The KDE side words link problems from the "links" reason, not from an English detail.
-                    this.activity('error', itemPath, linked ? '' : kationError.message);
+                    // The KDE side words link and storage problems from the reason, not from an English detail.
+                    // A full storage is reported once, not for each of the files waiting.
+                    if (!full || !this.storageFullReported) {
+                        this.activity('error', itemPath, linked || full ? '' : kationError.message);
+                    }
+                    this.storageFullReported ||= full;
                     this.options.onItemsChanged?.([itemPath]);
                 }
                 if (!errors.includes(folder)) {
@@ -1206,6 +1235,10 @@ export class SyncEngine {
     private async upload(parent: FolderContext, itemPath: string, local: LocalItem, existing: NodeEntity | undefined): Promise<void> {
         if (!(await statItem(this.absolute(itemPath)))) {
             throw Object.assign(new Error(`${itemPath} no longer exists in the sync folder`), { code: 'ENOENT' });
+        }
+        if (this.storageFull) {
+            // Proton refused an upload in this pass; trying the others would only repeat it.
+            throw new KationError('QuotaExceeded', 'The Proton Drive storage is full');
         }
         this.logger.info(`Uploading ${itemPath}${existing ? ' (new version)' : ''}`);
         this.setStatus({ current: itemPath });

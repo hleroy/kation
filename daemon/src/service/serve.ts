@@ -21,6 +21,7 @@ import { FakeAccount, FakeDrive } from './fakeDrive';
 import type { Account, DriveSdk } from './sdk';
 import { type Problem, Session } from './session';
 import { SessionRestorer, watchSecretService } from './sessionRestorer';
+import { StorageMonitor } from './storage';
 import { DriveTree } from './tree';
 
 export type ServeOptions = {
@@ -49,8 +50,17 @@ export async function serve(options: ServeOptions): Promise<void> {
         : await createProtonBackend(options.config, (event) => onEvent(event));
     const { logger } = backend;
 
+    // Its callbacks run only once started, after session and sync exist.
+    const storage = new StorageMonitor({
+        fetch: () => backend.account.getStorage(),
+        logger,
+        onChange: () => session.notifyStatus(),
+        onSpaceFreed: () => sync.retryNow(),
+        // The fake drive's changes show at once, for the KDE tests.
+        ...(options.fakeDrive ? { debounceMs: 0, minGapMs: 0 } : {}),
+    });
     const tree = new DriveTree(backend.sdk, logger);
-    const drive = new DriveService(backend.sdk, tree, logger);
+    const drive = new DriveService(backend.sdk, tree, logger, { onQuotaExceeded: () => storage.quotaExceeded() });
     const bus = dbus.sessionBus();
     let server: DriveDbusServer | undefined;
     let restorer: SessionRestorer | undefined;
@@ -74,7 +84,11 @@ export async function serve(options: ServeOptions): Promise<void> {
 
     const session = new Session(
         backend.account,
-        { appVersion: options.config.appVersion, sdkVersion: options.config.sdkVersion ?? '' },
+        {
+            appVersion: options.config.appVersion,
+            sdkVersion: options.config.sdkVersion ?? '',
+            storageUrl: `https://${options.config.accountUrl}/drive/dashboard`,
+        },
         logger,
         {
             statusChanged: (status) => server?.emitStatusChanged(status),
@@ -82,6 +96,7 @@ export async function serve(options: ServeOptions): Promise<void> {
             afterLogin: async () => {
                 await restorer?.stop();
                 tree.clear();
+                storage.start();
                 await backend.startEvents();
                 await sync.apply();
             },
@@ -89,10 +104,12 @@ export async function serve(options: ServeOptions): Promise<void> {
             afterRestore: async () => {
                 await restorer?.stop();
                 tree.clear();
+                storage.start();
                 await backend.startEvents().catch((error: unknown) => logger.error('Failed to start Drive events', error));
                 await sync.apply().catch((error: unknown) => logger.error('Failed to start sync', error));
             },
             afterLogout: async () => {
+                storage.stop();
                 try {
                     await sync.onLogout();
                     tree.clear();
@@ -101,12 +118,14 @@ export async function serve(options: ServeOptions): Promise<void> {
                 }
             },
             sessionLost: async () => {
+                storage.stop();
                 // Keep the sync state and event cursors: signing in again to the same account resumes where it stopped.
                 await backend.stopEvents();
                 await sync.onSessionLost();
                 tree.clear();
             },
             problem: backend.problem,
+            storage: () => storage.get(),
         },
     );
     await session.init();
@@ -118,9 +137,11 @@ export async function serve(options: ServeOptions): Promise<void> {
             server?.notifyFolderChanged(changed);
         }
         sync.onRemoteEvent(event);
+        storage.changed();
     };
     await server.start();
     if (session.isLoggedIn()) {
+        storage.start();
         await backend.startEvents().catch((error: unknown) => logger.error('Failed to start Drive events', error));
     } else if (!options.fakeDrive && options.config.credentialsStore === CredentialsStoreType.Keychain) {
         logger.info('Signed out: no session in the keyring, or it is still locked. Reading it again when the keyring changes');
@@ -153,6 +174,7 @@ export async function serve(options: ServeOptions): Promise<void> {
     await stopped;
     logger.info('Stopping');
     await restorer?.stop();
+    storage.dispose();
     await server.stop(busClosed);
     await sync.dispose();
     await backend.dispose();
@@ -171,6 +193,7 @@ async function createProtonBackend(config: Config, onEvent: (event: DriveEvent) 
             isLoggedIn: () => drive.auth.isLoggedIn(),
             loadSession: () => drive.auth.loadSession(),
             getEmail: async () => (await drive.addresses.getOwnPrimaryAddress()).email,
+            getStorage: () => drive.getStorage(),
             authViaWeb: async (onSignInUrl, signal) => {
                 await drive.auth.authViaWeb(onSignInUrl, signal);
             },
@@ -198,7 +221,9 @@ async function createFakeBackend(config: Config, onEvent: (event: DriveEvent) =>
         logger.warn(warning);
     }
     logger.warn('Serving a fake in-memory drive (--fake-drive). No data reaches Proton.');
-    const fake = new FakeDrive({ chunkDelayMs: Number(process.env.KATION_FAKE_CHUNK_DELAY_MS) || 0, onEvent });
+    // Tests set a storage limit with KATION_FAKE_STORAGE_MAX (bytes); unlimited otherwise.
+    const maxStorage = Number(process.env.KATION_FAKE_STORAGE_MAX) || undefined;
+    const fake = new FakeDrive({ chunkDelayMs: Number(process.env.KATION_FAKE_CHUNK_DELAY_MS) || 0, onEvent, maxStorage });
     return {
         sdk: fake.sdk,
         logger,
@@ -211,7 +236,10 @@ async function createFakeBackend(config: Config, onEvent: (event: DriveEvent) =>
                       detail: process.env.KATION_FAKE_PROBLEM_DETAIL ?? '',
                   }
                 : undefined,
-        account: new FakeAccount(process.env.KATION_FAKE_LOGGED_IN !== '0', Number(process.env.KATION_FAKE_LOGIN_DELAY_MS) || 1000),
+        account: new FakeAccount(process.env.KATION_FAKE_LOGGED_IN !== '0', Number(process.env.KATION_FAKE_LOGIN_DELAY_MS) || 1000, () => ({
+            used: fake.usedStorage(),
+            max: fake.maxStorage ?? 0,
+        })),
         startEvents: async () => {},
         stopEvents: async () => {},
         clearLocalData: () => clearAfterSignOut(config.cacheDir, clearLog, logger),

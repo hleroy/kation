@@ -6,7 +6,7 @@ add_library(kation_settings STATIC kationabout.cpp settingswidget.cpp trayautost
 target_include_directories(kation_settings PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kation_settings
     PUBLIC kation_dbus Qt6::Widgets KF6::CoreAddons
-    PRIVATE KF6::ConfigCore KF6::I18n KF6::KIOGui KF6::KIOWidgets
+    PRIVATE KF6::ConfigCore KF6::I18n KF6::KIOGui KF6::KIOWidgets KF6::WidgetsAddons
 )
 set_target_properties(kation_settings PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # The tray's autostart entry names the installed program, so it does not depend on PATH.

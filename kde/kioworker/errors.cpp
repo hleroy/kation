@@ -3,6 +3,7 @@
 
 #include "errors.h"
 
+#include "kationtexts.h"
 #include "kationtypes.h"
 #include "logging.h"
 
@@ -52,6 +53,9 @@ KIO::WorkerResult Kation::toWorkerResult(const QDBusError &error, const QUrl &ur
     }
     if (code == QLatin1String("RateLimited")) {
         return KIO::WorkerResult::fail(KIO::ERR_WORKER_DEFINED, i18n("Proton Drive is limiting requests from this device. Please try again in a few minutes."));
+    }
+    if (code == QLatin1String("QuotaExceeded")) {
+        return KIO::WorkerResult::fail(KIO::ERR_WORKER_DEFINED, Kation::storageWarningText(Kation::StorageLevel::Full));
     }
     if (code == QLatin1String("Integrity")) {
         return KIO::WorkerResult::fail(KIO::ERR_WORKER_DEFINED, i18n("The file failed an integrity check: %1", error.message()));

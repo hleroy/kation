@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kation 0.3.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-14 19:36+0100\n"
+"POT-Creation-Date: 2026-11-15 18:09+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -125,6 +125,27 @@ msgstr ""
 #: kde/app/tray.cpp
 #, kde-format
 msgid "Sync paused"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Proton Drive almost full"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Proton Drive is full"
+msgstr ""
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Manage Storage"
+msgstr ""
+
+#: kde/app/tray.cpp
+#, kde-format
+msgctxt "@info tray menu, the storage used"
+msgid "Storage: %1"
 msgstr ""
 
 #: kde/app/tray.cpp
@@ -268,6 +289,12 @@ msgstr ""
 #: kde/dbus/kationtexts.cpp
 #, kde-format
 msgid ""
+"Your Proton Drive storage is full: files you add or change are not uploaded."
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
 "A symbolic link in the sync folder has the same name as an item in Proton "
 "Drive. Kation does not sync symbolic links, so that item is not synced "
 "either: rename or remove the link."
@@ -292,6 +319,27 @@ msgstr ""
 #, kde-format
 msgctxt "@info a problem, then the error behind it"
 msgid "%1 (%2)"
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgctxt "@info storage: used, total, percentage used"
+msgid "%1 of %2 used (%3%)"
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"Your Proton Drive storage is almost full. Once it is full, files you add or "
+"change are no longer uploaded."
+msgstr ""
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"Your Proton Drive storage is full: files you add or change are not uploaded. "
+"Free up space (files in the Proton Drive trash count too) or get more "
+"storage."
 msgstr ""
 
 #: kde/dbus/kationweb.cpp
@@ -478,6 +526,12 @@ msgstr ""
 #: kde/settings/settingswidget.cpp
 #, kde-format
 msgid "Connecting…"
+msgstr ""
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgctxt "@label Proton Drive storage"
+msgid "Storage:"
 msgstr ""
 
 #: kde/settings/settingswidget.cpp

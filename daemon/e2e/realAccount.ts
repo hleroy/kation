@@ -611,6 +611,18 @@ async function main(): Promise<number> {
         assert(!logged.includes(`Downloading ${remote('Moved/from-proton.txt')}`), 'the renamed file was downloaded again');
     });
 
+    await step('E2E-25', 'The status reports the Drive storage, and it grows after an upload', async () => {
+        const before = await status();
+        if (options['fake-drive'] && Number(before.storageMax) <= 0) {
+            throw new Skip('the fake drive has no storage limit');
+        }
+        const usedBefore = Number(before.storageUsed);
+        assert(Number(before.storageMax) > 0 && usedBefore >= 0, `no storage in the status: ${before.storageUsed} of ${before.storageMax}`);
+        assert(String(before.storageUrl).startsWith('https://account.proton.me/'), `unexpected storage page: ${before.storageUrl}`);
+        await writeFile(local('storage.bin'), randomBytes(1024 * 1024));
+        await waitFor('the storage used to grow', async () => Number((await status()).storageUsed) > usedBefore, REMOTE_TIMEOUT_MS);
+    });
+
     await step('E2E-17', 'Starts with the session (systemd user unit enabled and active)', async () => {
         if (options['fake-drive']) {
             throw new Skip('not applicable to the fake drive');

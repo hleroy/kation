@@ -22,6 +22,7 @@ import {
 } from '@protontech/drive-sdk';
 
 import type { Account, DriveSdk } from './sdk';
+import type { Storage } from './storage';
 
 const CHUNK_SIZE = 64 * 1024;
 const SCOPE_ID = 'fake-volume';
@@ -47,7 +48,12 @@ export type FakeDriveOptions = {
     chunkDelayMs?: number;
     /** Called for each change, like Drive events would be. */
     onEvent?: (event: DriveEvent) => void;
+    /** Storage limit in bytes: uploads that do not fit fail as Proton's do. Unlimited by default. */
+    maxStorage?: number;
 };
+
+/** Like Proton's INSUFFICIENT_QUOTA. */
+const INSUFFICIENT_QUOTA = 200001;
 
 export class FakeDrive {
     private readonly nodes = new Map<string, FakeNode>();
@@ -77,6 +83,24 @@ export class FakeDrive {
         };
         this.nodes.set(fake.uid, fake);
         return fake;
+    }
+
+    /** Storage limit; tests change it to free space or fill the drive. */
+    get maxStorage(): number | undefined {
+        return this.options.maxStorage;
+    }
+
+    set maxStorage(max: number | undefined) {
+        this.options.maxStorage = max;
+    }
+
+    /** Bytes used by files, including those in the trash, as Proton counts them. */
+    usedStorage(): number {
+        let used = 0;
+        for (const node of this.nodes.values()) {
+            used += node.content?.length ?? 0;
+        }
+        return used;
     }
 
     /** Test helper: content of a file node. */
@@ -355,6 +379,11 @@ export class FakeDrive {
         return {
             uploadFromStream: async (stream: ReadableStream, _thumbnails: unknown[], onProgress?: (bytes: number) => void) =>
                 this.controller(async () => {
+                    // Proton checks the announced size when the draft is created, before any data is sent.
+                    const max = this.options.maxStorage;
+                    if (max !== undefined && this.usedStorage() + (metadata.expectedSize ?? 0) > max) {
+                        throw new ValidationError('Insufficient storage quota', INSUFFICIENT_QUOTA);
+                    }
                     const chunks: Uint8Array[] = [];
                     let total = 0;
                     for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
@@ -431,6 +460,7 @@ export class FakeAccount implements Account {
     constructor(
         private loggedIn = true,
         private readonly loginDelayMs = 1000,
+        private readonly storage: () => Storage = () => ({ used: 0, max: 5 * 1024 ** 3 }),
     ) {}
 
     isLoggedIn(): boolean {
@@ -446,6 +476,10 @@ export class FakeAccount implements Account {
 
     async getEmail(): Promise<string> {
         return 'tester@example.com';
+    }
+
+    async getStorage(): Promise<Storage> {
+        return this.storage();
     }
 
     async authViaWeb(onSignInUrl: (url: string) => void, signal: AbortSignal): Promise<void> {
