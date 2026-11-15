@@ -71,6 +71,7 @@ private:
     bool m_reachable = false;
     QVariantMap m_status;
     QVariantMap m_syncStatus;
+    bool m_uploadsRefused = false;
     QList<QVariantMap> m_activity;
     QStringList m_pendingConflicts;
     QTimer *m_conflictTimer;

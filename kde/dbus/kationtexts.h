@@ -32,9 +32,14 @@ enum class StorageLevel {
 /// Usage from which the storage counts as almost full, in percent.
 inline constexpr int almostFullPercent = 90;
 
-/// From a status (storageUsed, storageMax) and a sync status: Full also when
-/// Proton refused uploads for lack of space (reason "storageFull").
-StorageLevel storageLevel(const QVariantMap &status, const QVariantMap &syncStatus = {});
+/// From a status (storageUsed, storageMax): Full also when Proton refused
+/// uploads for lack of space (see uploadsRefused).
+StorageLevel storageLevel(const QVariantMap &status, bool uploadsRefused = false);
+
+/// Whether Proton refuses uploads for lack of space, from a sync status and the
+/// previous answer: kationd clears the "storageFull" reason while a pass retries,
+/// so it holds until a pass ends without it.
+bool uploadsRefused(const QVariantMap &syncStatus, bool before);
 
 /// Percentage of the storage used, rounded down, or -1 when unknown.
 int storagePercent(const QVariantMap &status);

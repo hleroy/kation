@@ -121,6 +121,7 @@ private:
     QPushButton *m_syncPause;
     QPushButton *m_syncChooseFolder;
     QVariantMap m_syncStatus;
+    bool m_uploadsRefused = false;
 
     QLabel *m_foldersHint;
     QTreeWidget *m_folders;

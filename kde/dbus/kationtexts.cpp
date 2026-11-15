@@ -71,9 +71,18 @@ QString Kation::problemText(const QVariantMap &status)
     return detail.isEmpty() ? text : i18nc("@info a problem, then the error behind it", "%1 (%2)", text, detail);
 }
 
-Kation::StorageLevel Kation::storageLevel(const QVariantMap &status, const QVariantMap &syncStatus)
+bool Kation::uploadsRefused(const QVariantMap &syncStatus, bool before)
 {
     if (syncStatus.value(QStringLiteral("reason")).toString() == QLatin1String("storageFull")) {
+        return true;
+    }
+    const QString state = syncStatus.value(QStringLiteral("state")).toString();
+    return before && (state == QLatin1String("syncing") || state == QLatin1String("paused"));
+}
+
+Kation::StorageLevel Kation::storageLevel(const QVariantMap &status, bool uploadsRefused)
+{
+    if (uploadsRefused) {
         return StorageLevel::Full;
     }
     const int percent = storagePercent(status);

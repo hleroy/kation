@@ -216,6 +216,7 @@ void KationTray::showSyncStatus(const QVariantMap &status)
 {
     const QString previousState = m_syncStatus.value(QStringLiteral("state")).toString();
     m_syncStatus = status;
+    m_uploadsRefused = Kation::uploadsRefused(status, m_uploadsRefused);
     const QString state = status.value(QStringLiteral("state")).toString();
     const QString message = Kation::syncReasonText(status);
 
@@ -246,10 +247,11 @@ void KationTray::showSyncStatus(const QVariantMap &status)
 void KationTray::checkStorage()
 {
     const QString email = m_status.value(QStringLiteral("email")).toString();
-    if (!m_status.value(QStringLiteral("loggedIn")).toBool() || email.isEmpty()) {
+    // Without the sync status, a refusal by Proton is not known yet: the level would look lower and re-arm.
+    if (!m_status.value(QStringLiteral("loggedIn")).toBool() || email.isEmpty() || m_syncStatus.isEmpty()) {
         return;
     }
-    const Kation::StorageLevel level = Kation::storageLevel(m_status, m_syncStatus);
+    const Kation::StorageLevel level = Kation::storageLevel(m_status, m_uploadsRefused);
     if (level == Kation::StorageLevel::Unknown) {
         return;
     }

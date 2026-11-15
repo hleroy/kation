@@ -700,7 +700,7 @@ void KationSettingsWidget::updateStorage()
 {
     const bool loggedIn = m_status.value(QStringLiteral("loggedIn")).toBool();
     // The sync status says when Proton refused uploads; it is stale while signed out.
-    const Kation::StorageLevel level = loggedIn ? Kation::storageLevel(m_status, m_syncStatus) : Kation::StorageLevel::Unknown;
+    const Kation::StorageLevel level = loggedIn ? Kation::storageLevel(m_status, m_uploadsRefused) : Kation::StorageLevel::Unknown;
     const bool known = Kation::storagePercent(m_status) >= 0;
     m_storage->setVisible(loggedIn && known);
     if (known) {
@@ -811,6 +811,7 @@ void KationSettingsWidget::refreshSync()
 void KationSettingsWidget::showSyncStatus(const QVariantMap &status)
 {
     m_syncStatus = status;
+    m_uploadsRefused = Kation::uploadsRefused(status, m_uploadsRefused);
     updateStorage();
     const bool enabled = status.value(QStringLiteral("enabled")).toBool();
     const bool paused = status.value(QStringLiteral("paused")).toBool();

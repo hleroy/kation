@@ -141,6 +141,34 @@ describe('StorageMonitor', () => {
         expect(ctx.freed()).toBe(1);
     });
 
+    it('reads again for a new session while a request of the previous session is still in flight', async () => {
+        const first = Promise.withResolvers<Storage>();
+        let calls = 0;
+        const ctx = createMonitor(() => (++calls === 1 ? first.promise : { used: 2, max: 10 }));
+        ctx.monitor.start();
+        ctx.monitor.stop();
+        ctx.monitor.start();
+        await ctx.settle();
+        expect(ctx.monitor.get()).toEqual({ used: 2, max: 10 });
+        first.resolve({ used: 1, max: 10 });
+        await ctx.settle();
+        expect(ctx.monitor.get()).toEqual({ used: 2, max: 10 });
+    });
+
+    it('reads again after a request that was in flight when something changed', async () => {
+        const slow = Promise.withResolvers<Storage>();
+        let calls = 0;
+        const ctx = createMonitor(() => (++calls === 1 ? slow.promise : { used: 7, max: 10 }));
+        ctx.monitor.start();
+        ctx.monitor.changed();
+        await Bun.sleep(5);
+        slow.resolve({ used: 1, max: 10 });
+        await ctx.settle();
+        await ctx.settle();
+        expect(ctx.fetches()).toBe(2);
+        expect(ctx.monitor.get()).toEqual({ used: 7, max: 10 });
+    });
+
     it('ignores an answer that arrives after a stop', async () => {
         const { promise, resolve } = Promise.withResolvers<Storage>();
         const ctx = createMonitor(() => promise);

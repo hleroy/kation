@@ -327,11 +327,14 @@ export class SyncEngine {
 
     /** Runs the retry that is waiting for its backoff now (e.g. storage space was freed). */
     retryNow(): void {
-        if (!this.timer || this.stopped || this.paused) {
+        if (this.stopped || this.paused) {
             return;
         }
+        // During a pass: if it fails, its retry comes after the shortest backoff.
         this.retryDelayMs = 0;
-        this.schedule(0);
+        if (this.timer) {
+            this.schedule(0);
+        }
     }
 
     /** Resolves when no work is pending or running. For tests and shutdown. */

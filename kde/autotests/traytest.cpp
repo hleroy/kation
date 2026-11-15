@@ -202,44 +202,53 @@ void TrayTest::notifiesStorageOncePerLevel()
     auto item = m_tray->findChild<KStatusNotifierItem *>();
     QVERIFY(item->toolTipSubTitle().contains(u"Storage: "_s));
 
-    // 95% used: almost full, notified once.
     KationDriveInterface drive(Kation::serviceName, Kation::objectPath, QDBusConnection::sessionBus());
-    const QString big = m_storageHome.filePath(u"big.bin"_s);
-    write(big, QByteArray(950, 'x'));
-    QDBusPendingReply<QVariantMap> upload = drive.Upload(big, u"/big.bin"_s, false, u"s1"_s);
-    upload.waitForFinished();
-    QVERIFY2(!upload.isError(), qPrintable(upload.error().message()));
-    QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 5000);
-    QCOMPARE(spy.at(0).at(0).toString(), u"storage"_s);
-    QVERIFY2(spy.at(0).at(1).toString().contains(u"almost full"_s), qPrintable(spy.at(0).at(1).toString()));
-    QTRY_VERIFY(action("storage")->text().endsWith(u" used (95%)"_s));
+    auto upload = [&](const QString &name, int size) {
+        const QString path = m_storageHome.filePath(name);
+        write(path, QByteArray(size, 'x'));
+        QDBusPendingReply<QVariantMap> reply = drive.Upload(path, u"/"_s + name, false, name);
+        reply.waitForFinished();
+        return reply.isError() ? reply.error().name() : QString();
+    };
+    QCOMPARE(upload(u"half.bin"_s, 500), QString());
+    QTRY_VERIFY(action("storage")->text().endsWith(u" used (50%)"_s));
 
-    // An upload that does not fit is refused with its own error.
-    const QString more = m_storageHome.filePath(u"more.bin"_s);
-    write(more, QByteArray(100, 'y'));
-    upload = drive.Upload(more, u"/more.bin"_s, false, u"s2"_s);
-    upload.waitForFinished();
-    QCOMPARE(upload.error().name(), Kation::errorPrefix + u"QuotaExceeded"_s);
-
-    // Sync cannot upload either: "full", in place of the generic sync problem.
+    // Half full, but a file larger than the space left: "full", in place of the generic sync problem.
     QVERIFY(QDir().mkpath(m_storageHome.filePath(u"Proton Drive"_s)));
-    write(m_storageHome.filePath(u"Proton Drive/local.bin"_s), QByteArray(100, 'z'));
+    write(m_storageHome.filePath(u"Proton Drive/large.bin"_s), QByteArray(600, 'z'));
     drive.SetSyncEnabled(true).waitForFinished();
-    QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 2, 10000);
-    QCOMPARE(spy.at(1).at(0).toString(), u"storage"_s);
-    QVERIFY2(spy.at(1).at(1).toString().contains(u"storage is full"_s), qPrintable(spy.at(1).at(1).toString()));
+    QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 10000);
+    QCOMPARE(spy.at(0).at(0).toString(), u"storage"_s);
+    QVERIFY2(spy.at(0).at(1).toString().contains(u"storage is full"_s), qPrintable(spy.at(0).at(1).toString()));
     QTRY_VERIFY(m_tray->statusText().startsWith(u"Problem: Your Proton Drive storage is full"_s));
     QCOMPARE(m_tray->iconName(), u"kation-tray-error"_s);
 
-    // Started again at the same level (the next login): not notified again.
+    // Each retry clears the reason while it runs: that must not count as space freed.
+    for (int i = 0; i < 2; ++i) {
+        drive.SyncNow().waitForFinished();
+        QTest::qWait(1000);
+        QTRY_VERIFY(m_tray->statusText().startsWith(u"Problem: "_s));
+    }
+    QCOMPARE(spy.size(), 1);
+
+    // Started again (the next login), whichever status arrives first: not notified again.
     m_tray = std::make_unique<KationTray>();
     QSignalSpy again(m_tray.get(), &KationTray::notified);
     QTRY_VERIFY(m_tray->statusText().startsWith(u"Problem: "_s));
     QTest::qWait(500);
     QCOMPARE(again.size(), 0);
 
+    // Sync off: nothing is refused any more. At 95% the storage is almost full.
     drive.SetSyncEnabled(false).waitForFinished();
     QTRY_COMPARE(m_tray->statusText(), u"Sync is off"_s);
+    QCOMPARE(upload(u"more.bin"_s, 450), QString());
+    QTRY_COMPARE_WITH_TIMEOUT(again.size(), 1, 5000);
+    QCOMPARE(again.at(0).at(0).toString(), u"storage"_s);
+    QVERIFY2(again.at(0).at(1).toString().contains(u"almost full"_s), qPrintable(again.at(0).at(1).toString()));
+    QTRY_VERIFY(action("storage")->text().endsWith(u" used (95%)"_s));
+
+    // An upload that does not fit is refused with its own error.
+    QCOMPARE(upload(u"too-much.bin"_s, 100), Kation::errorPrefix + u"QuotaExceeded"_s);
 }
 
 void TrayTest::shipsItsStateIcons()

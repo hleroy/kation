@@ -46,6 +46,9 @@ export class StorageMonitor {
     private timer?: ReturnType<typeof setTimeout>;
     private lastFetch = Number.NEGATIVE_INFINITY;
     private fetching?: Promise<void>;
+    private fetchingGeneration = 0;
+    /** A refresh was asked while a request was in flight: its answer may predate the change. */
+    private refreshAgain = false;
     private quotaErrorPending = false;
     /** Free bytes read after Proton refused an upload for quota. */
     private availableAtQuotaError?: number;
@@ -90,6 +93,7 @@ export class StorageMonitor {
         this.lastFetch = Number.NEGATIVE_INFINITY;
         this.quotaErrorPending = false;
         this.availableAtQuotaError = undefined;
+        this.refreshAgain = false;
     }
 
     /** Something changed in Proton Drive: read the storage again soon. */
@@ -119,29 +123,42 @@ export class StorageMonitor {
     }
 
     private refresh(): Promise<void> {
-        if (this.fetching) {
+        const generation = this.generation;
+        // A request from before a stop belongs to another session: never reuse it.
+        if (this.fetching && this.fetchingGeneration === generation) {
+            this.refreshAgain = true;
             return this.fetching;
         }
-        const generation = this.generation;
         this.lastFetch = this.options.now();
         const quotaError = this.quotaErrorPending;
         this.quotaErrorPending = false;
-        this.fetching = (async () => {
-            try {
-                const storage = await this.options.fetch();
-                if (generation === this.generation) {
-                    this.apply(storage, quotaError);
-                }
-            } catch (error: unknown) {
-                if (generation === this.generation) {
-                    this.quotaErrorPending ||= quotaError;
-                }
-                this.options.logger.debug(`Failed to read the storage quota: ${error}`);
-            } finally {
-                this.fetching = undefined;
+        this.fetchingGeneration = generation;
+        const fetching: Promise<void> = this.fetchOnce(generation, quotaError).finally(() => {
+            if (this.fetching !== fetching) {
+                return;
             }
-        })();
-        return this.fetching;
+            this.fetching = undefined;
+            if (this.refreshAgain && generation === this.generation) {
+                this.refreshAgain = false;
+                void this.refresh();
+            }
+        });
+        this.fetching = fetching;
+        return fetching;
+    }
+
+    private async fetchOnce(generation: number, quotaError: boolean): Promise<void> {
+        try {
+            const storage = await this.options.fetch();
+            if (generation === this.generation) {
+                this.apply(storage, quotaError);
+            }
+        } catch (error: unknown) {
+            if (generation === this.generation) {
+                this.quotaErrorPending ||= quotaError;
+            }
+            this.options.logger.debug(`Failed to read the storage quota: ${error}`);
+        }
     }
 
     private apply(storage: Storage, quotaError: boolean): void {

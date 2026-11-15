@@ -113,8 +113,20 @@ void KationTextsTest::storage()
     QCOMPARE(Kation::storageLevel(status(100, 100)), StorageLevel::Full);
     QCOMPARE(Kation::storageLevel(status(120, 100)), StorageLevel::Full);
     // Proton refused a file larger than the space left.
-    QCOMPARE(Kation::storageLevel(status(50, 100), {{u"reason"_s, u"storageFull"_s}}), StorageLevel::Full);
-    QCOMPARE(Kation::storageLevel({}, {{u"reason"_s, u"storageFull"_s}}), StorageLevel::Full);
+    QCOMPARE(Kation::storageLevel(status(50, 100), true), StorageLevel::Full);
+    QCOMPARE(Kation::storageLevel({}, true), StorageLevel::Full);
+
+    // A refusal holds while the next pass retries or sync is paused, until a pass ends without it.
+    auto sync = [](const QString &state, const QString &reason = {}) {
+        return QVariantMap{{u"state"_s, state}, {u"reason"_s, reason}};
+    };
+    QVERIFY(Kation::uploadsRefused(sync(u"error"_s, u"storageFull"_s), false));
+    QVERIFY(Kation::uploadsRefused(sync(u"syncing"_s), true));
+    QVERIFY(Kation::uploadsRefused(sync(u"paused"_s, u"user"_s), true));
+    QVERIFY(!Kation::uploadsRefused(sync(u"syncing"_s), false));
+    QVERIFY(!Kation::uploadsRefused(sync(u"idle"_s), true));
+    QVERIFY(!Kation::uploadsRefused(sync(u"error"_s, u"items"_s), true));
+    QVERIFY(!Kation::uploadsRefused(sync(u"disabled"_s), true));
 
     QCOMPARE(Kation::storagePercent(status(GiB * 3 / 2, 5 * GiB)), 30);
     QCOMPARE(Kation::storagePercent(status(-1, -1)), -1);
