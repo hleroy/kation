@@ -179,6 +179,7 @@ jobs:
       - name: Check the package scripts
         run: |
           bsdtar -xOf dist/kation-*.pkg.tar.zst .INSTALL | grep -q 'kation_user_sessions upgrade'
+          bsdtar -xOf dist/kation-*.pkg.tar.zst .INSTALL | grep -q 'kation_user_sessions remove'
           pacman -U --noconfirm dist/kation-*.pkg.tar.zst
           pacman -R --noconfirm kation
           pacman -U --noconfirm dist/kation-*.pkg.tar.zst

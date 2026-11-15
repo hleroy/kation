@@ -55,9 +55,10 @@ sudo dnf install ./kation-*.fc43.x86_64.rpm      # Fedora 43
 sudo pacman -U kation-*-x86_64.pkg.tar.zst       # Arch Linux
 ```
 
-Installing or upgrading the package restarts Kation's background service and
-tray icon in the sessions where they run, so an upgrade takes effect without
-logging out. Restart Dolphin afterwards (`kquitapp6 dolphin`) so it loads the
+Installing or upgrading the package restarts Kation's background service in
+the sessions where it runs, and the tray icon follows (from 0.4.0 on: when
+upgrading from an older version, quit Kation from its tray menu and start it
+again), so an upgrade takes effect without logging out. Restart Dolphin afterwards (`kquitapp6 dolphin`) so it loads the
 new emblems and context menu.
 
 Each package is built for that distribution release. On another

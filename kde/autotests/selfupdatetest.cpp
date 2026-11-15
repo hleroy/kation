@@ -88,7 +88,7 @@ void SelfUpdateTest::relaunchesWhenTheWindowCloses()
         ++runs;
     });
     // The settings window: a widget deleted when closed. QWidget emits destroyed()
-    // before its QPointers are cleared, the case that kept the tray from relaunching.
+    // before its QPointers are cleared.
     auto window = new QWidget;
     window->setAttribute(Qt::WA_DeleteOnClose);
     window->show();

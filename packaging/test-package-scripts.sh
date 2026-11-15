@@ -50,9 +50,7 @@ UPGRADE="list-units --state=running --plain --no-legend user@*.service
 --user -M 1001@ try-restart --no-block kationd.service"
 REMOVE="list-units --state=running --plain --no-legend user@*.service
 --user -M 1000@ stop --no-block kationd.service
---user -M 1000@ daemon-reload
---user -M 1001@ stop --no-block kationd.service
---user -M 1001@ daemon-reload"
+--user -M 1001@ stop --no-block kationd.service"
 
 # check NAME EXPECTED_LOG [ENV=VALUE...] -- COMMAND...: runs COMMAND with only
 # the fake commands on PATH, then compares the systemctl calls it made.

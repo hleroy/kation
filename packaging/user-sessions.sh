@@ -8,7 +8,8 @@
 
 # kation_user_sessions upgrade: reload the units and restart kationd where it
 #   runs (try-restart starts nothing: sync that is off stays off).
-# kation_user_sessions remove: stop kationd, its program is about to go.
+# kation_user_sessions remove: stop kationd, its program is about to go (the
+#   managers forget the unit at their next reload or login).
 # Never fails: a package operation must not depend on the users' sessions.
 kation_user_sessions() {
     command -v systemctl >/dev/null 2>&1 || return 0
@@ -24,7 +25,6 @@ kation_user_sessions() {
             kation_user_systemctl "$kation_uid" try-restart --no-block kationd.service
         else
             kation_user_systemctl "$kation_uid" stop --no-block kationd.service
-            kation_user_systemctl "$kation_uid" daemon-reload
         fi
     done
     return 0
@@ -35,9 +35,10 @@ kation_user_systemctl() {
     kation_for=$1
     shift
     # A user manager that does not answer must not hold up the package manager.
+    # </dev/null: the caller reads the list of managers from standard input.
     if command -v timeout >/dev/null 2>&1; then
-        timeout 30 systemctl --user -M "$kation_for@" "$@" >/dev/null 2>&1 || true
+        timeout 30 systemctl --user -M "$kation_for@" "$@" </dev/null >/dev/null 2>&1 || true
     else
-        systemctl --user -M "$kation_for@" "$@" >/dev/null 2>&1 || true
+        systemctl --user -M "$kation_for@" "$@" </dev/null >/dev/null 2>&1 || true
     fi
 }
