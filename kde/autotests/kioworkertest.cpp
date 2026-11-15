@@ -13,6 +13,7 @@
 #include <KIO/CopyJob>
 #include <KIO/DeleteJob>
 #include <KIO/FileCopyJob>
+#include <KIO/FileSystemFreeSpaceJob>
 #include <KIO/ListJob>
 #include <KIO/MkdirJob>
 #include <KIO/StatJob>
@@ -85,6 +86,7 @@ private Q_SLOTS:
     void deletesFoldersRecursively();
     void reportsMissingFiles();
     void reloadsViewsOnRemoteChanges();
+    void reportsStorage();
     void requiresSignIn();
 
 public Q_SLOTS:
@@ -97,6 +99,8 @@ private:
     QStringList listNames(const QUrl &url);
     QStringList m_addedNotifications;
 
+    static constexpr qint64 StorageMax = 4 * 1024 * 1024;
+
     QTemporaryDir m_home;
     std::unique_ptr<FakeKationd> m_kationd;
     KationDriveInterface *m_drive = nullptr;
@@ -107,7 +111,9 @@ void KioWorkerTest::initTestCase()
     QVERIFY(m_home.isValid());
     Kation::registerDBusTypes();
     // Also keeps the worker's spool, caches and logs in the test folder.
-    m_kationd = std::make_unique<FakeKationd>(m_home);
+    QProcessEnvironment env;
+    env.insert(u"KATION_FAKE_STORAGE_MAX"_s, QString::number(StorageMax));
+    m_kationd = std::make_unique<FakeKationd>(m_home, env);
     QVERIFY(m_kationd->start());
     // kationd made it private as it started: check that the worker does too.
     QVERIFY(QFile::setPermissions(m_home.filePath(u"cache/kation"_s),
@@ -340,6 +346,25 @@ void KioWorkerTest::reloadsViewsOnRemoteChanges()
     QTRY_VERIFY_WITH_TIMEOUT(m_addedNotifications.contains(u"protondrive:/Docs"_s), 5000);
 }
 
+void KioWorkerTest::reportsStorage()
+{
+    QDBusPendingReply<QVariantMap> status = m_drive->GetStatus();
+    status.waitForFinished();
+    const qint64 used = status.value().value(u"storageUsed"_s).toLongLong();
+    QVERIFY(used > 0);
+
+    // What Dolphin's status bar shows for protondrive:/.
+    KIO::FileSystemFreeSpaceJob *space = KIO::fileSystemFreeSpace(driveUrl(u"/Docs"_s));
+    QVERIFY2(space->exec(), qPrintable(space->errorString()));
+    QCOMPARE(space->size(), KIO::filesize_t(StorageMax));
+    QCOMPARE(space->availableSize(), KIO::filesize_t(StorageMax - used));
+
+    KIO::StoredTransferJob *put = KIO::storedPut(QByteArray(StorageMax - used + 1, 'x'), driveUrl(u"/too-big.bin"_s), -1, KIO::HideProgressInfo);
+    QVERIFY(!put->exec());
+    QCOMPARE(put->error(), int(KIO::ERR_WORKER_DEFINED));
+    QVERIFY2(put->errorString().contains(u"storage is full"_s), qPrintable(put->errorString()));
+}
+
 void KioWorkerTest::requiresSignIn()
 {
     QDBusPendingReply<> logout = m_drive->Logout();
@@ -350,6 +375,10 @@ void KioWorkerTest::requiresSignIn()
     QVERIFY(!list->exec());
     QCOMPARE(list->error(), int(KIO::ERR_WORKER_DEFINED));
     QVERIFY2(list->errorString().contains(u"not signed in"_s), qPrintable(list->errorString()));
+
+    // Signed out, the storage is unknown: Dolphin shows no free space.
+    KIO::FileSystemFreeSpaceJob *space = KIO::fileSystemFreeSpace(driveUrl(u"/"_s));
+    QVERIFY(!space->exec());
 }
 
 QTEST_GUILESS_MAIN(KioWorkerTest)

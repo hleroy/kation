@@ -16,8 +16,10 @@
 
 #include <KCModule>
 #include <KCModuleLoader>
+#include <KMessageWidget>
 #include <KPluginMetaData>
 
+#include <QAction>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QDesktopServices>
@@ -26,6 +28,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QLabel>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QSpinBox>
@@ -61,6 +64,8 @@ private Q_SLOTS:
     void signsInAndOut();
     void foldersLimitsAndStartup();
     void aboutTab();
+    // After aboutTab, which checks the window's size without a storage warning.
+    void showsStorage();
     void displaysVersions();
     void showLogNeedsALog();
     void systemSettingsMode();
@@ -74,6 +79,8 @@ private:
     void screenshot(const QString &name);
     bool nothingClipped() const;
 
+    static constexpr qint64 StorageMax = 1024 * 1024;
+
     QTemporaryDir m_home;
     std::unique_ptr<FakeKationd> m_kationd;
     std::unique_ptr<KationSettingsWidget> m_window;
@@ -86,6 +93,7 @@ void SettingsWidgetTest::initTestCase()
     QProcessEnvironment env;
     env.insert(u"KATION_FAKE_LOGGED_IN"_s, u"0"_s);
     env.insert(u"KATION_FAKE_LOGIN_DELAY_MS"_s, u"500"_s);
+    env.insert(u"KATION_FAKE_STORAGE_MAX"_s, QString::number(StorageMax));
     m_kationd = std::make_unique<FakeKationd>(m_home, env);
     QVERIFY(m_kationd->start());
     QDesktopServices::setUrlHandler(u"https"_s, this, "openUrl");
@@ -303,6 +311,51 @@ void SettingsWidgetTest::foldersLimitsAndStartup()
     QVERIFY(readFile(Kation::trayAutostartPath()).contains(expectedExec));
     QTRY_VERIFY(!m_window->hasChanges());
     screenshot(u"6-network-startup"_s);
+}
+
+void SettingsWidgetTest::showsStorage()
+{
+    auto tabs = m_window->findChild<QTabWidget *>(u"tabs"_s);
+    tabs->setCurrentIndex(0);
+    auto storage = m_window->findChild<QWidget *>(u"storage"_s);
+    auto text = m_window->findChild<QLabel *>(u"storageText"_s);
+    auto bar = m_window->findChild<QProgressBar *>(u"storageBar"_s);
+    auto warning = m_window->findChild<KMessageWidget *>(u"storageWarning"_s);
+    QTRY_VERIFY(storage->isVisible());
+    QVERIFY2(text->text().endsWith(u" used (0%)"_s), qPrintable(text->text()));
+    QVERIFY(!warning->isVisible());
+
+    // Almost full: a warning, with a way to the account's storage page.
+    KationDriveInterface drive(Kation::serviceName, Kation::objectPath, QDBusConnection::sessionBus());
+    auto upload = [&](const QString &name, qint64 size) {
+        const QString path = m_home.filePath(name);
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArray(size, 'x'));
+        file.close();
+        QDBusPendingReply<QVariantMap> reply = drive.Upload(path, u"/"_s + name, false, name);
+        reply.waitForFinished();
+        QVERIFY2(!reply.isError(), qPrintable(reply.error().message()));
+    };
+    // Earlier tests uploaded a few bytes: still 95%.
+    upload(u"most.bin"_s, StorageMax * 95 / 100);
+    QTRY_VERIFY(warning->isVisible());
+    QCOMPARE(warning->messageType(), KMessageWidget::Warning);
+    QVERIFY(warning->text().contains(u"almost full"_s));
+    QVERIFY(text->text().endsWith(u" used (95%)"_s));
+    QCOMPARE(bar->value(), 950);
+    m_openedUrls.clear();
+    warning->actions().first()->trigger();
+    QCOMPARE(m_openedUrls, QList<QUrl>{QUrl(u"https://account.proton.me/drive/dashboard"_s)});
+    screenshot(u"7-storage-almost-full"_s);
+
+    QDBusPendingReply<QVariantMap> status = drive.GetStatus();
+    status.waitForFinished();
+    upload(u"rest.bin"_s, StorageMax - status.value().value(u"storageUsed"_s).toLongLong());
+    QTRY_COMPARE(warning->messageType(), KMessageWidget::Error);
+    QVERIFY(warning->text().contains(u"storage is full"_s));
+    QCOMPARE(bar->value(), 1000);
+    QTRY_VERIFY2(nothingClipped(), "Text or buttons of the window are cut off");
 }
 
 void SettingsWidgetTest::aboutTab()

@@ -32,6 +32,7 @@ private Q_SLOTS:
     void cleanupTestCase();
     void followsSyncAndNotifiesConflicts();
     void escapesFileNamesInTheTooltip();
+    void notifiesStorageOncePerLevel();
     void shipsItsStateIcons();
 
 private:
@@ -56,6 +57,7 @@ private:
     }
 
     QTemporaryDir m_home;
+    QTemporaryDir m_storageHome;
     std::unique_ptr<FakeKationd> m_kationd;
     std::unique_ptr<KationTray> m_tray;
 };
@@ -177,6 +179,64 @@ void TrayTest::escapesFileNamesInTheTooltip()
     QTRY_VERIFY_WITH_TIMEOUT(activityFor(), 20000);
     const QString tip = activityFor()->toolTip();
     QVERIFY2(Qt::mightBeRichText(tip) && tip.contains(u"&lt;b&gt;x&lt;br&gt;y.txt"_s), qPrintable(tip));
+
+    drive.SetSyncEnabled(false).waitForFinished();
+    QTRY_COMPARE(m_tray->statusText(), u"Sync is off"_s);
+}
+
+void TrayTest::notifiesStorageOncePerLevel()
+{
+    // A fresh home: a 1000-byte drive, and no sync state or files from the tests above.
+    m_tray.reset();
+    QVERIFY2(m_kationd->stop(), "kationd did not exit cleanly");
+    QProcessEnvironment small;
+    small.insert(u"KATION_FAKE_STORAGE_MAX"_s, u"1000"_s);
+    m_kationd = std::make_unique<FakeKationd>(m_storageHome, small);
+    QVERIFY(m_kationd->start());
+    m_tray = std::make_unique<KationTray>();
+    QSignalSpy spy(m_tray.get(), &KationTray::notified);
+    QTRY_COMPARE(m_tray->statusText(), u"Sync is off"_s);
+    QTRY_VERIFY(action("storage")->isVisible());
+    QVERIFY2(action("storage")->text().startsWith(u"Storage: "_s) && action("storage")->text().endsWith(u" used (0%)"_s),
+             qPrintable(action("storage")->text()));
+    auto item = m_tray->findChild<KStatusNotifierItem *>();
+    QVERIFY(item->toolTipSubTitle().contains(u"Storage: "_s));
+
+    // 95% used: almost full, notified once.
+    KationDriveInterface drive(Kation::serviceName, Kation::objectPath, QDBusConnection::sessionBus());
+    const QString big = m_storageHome.filePath(u"big.bin"_s);
+    write(big, QByteArray(950, 'x'));
+    QDBusPendingReply<QVariantMap> upload = drive.Upload(big, u"/big.bin"_s, false, u"s1"_s);
+    upload.waitForFinished();
+    QVERIFY2(!upload.isError(), qPrintable(upload.error().message()));
+    QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 5000);
+    QCOMPARE(spy.at(0).at(0).toString(), u"storage"_s);
+    QVERIFY2(spy.at(0).at(1).toString().contains(u"almost full"_s), qPrintable(spy.at(0).at(1).toString()));
+    QTRY_VERIFY(action("storage")->text().endsWith(u" used (95%)"_s));
+
+    // An upload that does not fit is refused with its own error.
+    const QString more = m_storageHome.filePath(u"more.bin"_s);
+    write(more, QByteArray(100, 'y'));
+    upload = drive.Upload(more, u"/more.bin"_s, false, u"s2"_s);
+    upload.waitForFinished();
+    QCOMPARE(upload.error().name(), Kation::errorPrefix + u"QuotaExceeded"_s);
+
+    // Sync cannot upload either: "full", in place of the generic sync problem.
+    QVERIFY(QDir().mkpath(m_storageHome.filePath(u"Proton Drive"_s)));
+    write(m_storageHome.filePath(u"Proton Drive/local.bin"_s), QByteArray(100, 'z'));
+    drive.SetSyncEnabled(true).waitForFinished();
+    QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 2, 10000);
+    QCOMPARE(spy.at(1).at(0).toString(), u"storage"_s);
+    QVERIFY2(spy.at(1).at(1).toString().contains(u"storage is full"_s), qPrintable(spy.at(1).at(1).toString()));
+    QTRY_VERIFY(m_tray->statusText().startsWith(u"Problem: Your Proton Drive storage is full"_s));
+    QCOMPARE(m_tray->iconName(), u"kation-tray-error"_s);
+
+    // Started again at the same level (the next login): not notified again.
+    m_tray = std::make_unique<KationTray>();
+    QSignalSpy again(m_tray.get(), &KationTray::notified);
+    QTRY_VERIFY(m_tray->statusText().startsWith(u"Problem: "_s));
+    QTest::qWait(500);
+    QCOMPARE(again.size(), 0);
 
     drive.SetSyncEnabled(false).waitForFinished();
     QTRY_COMPARE(m_tray->statusText(), u"Sync is off"_s);

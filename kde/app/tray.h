@@ -53,11 +53,14 @@ private:
     void openUrl(const QUrl &url);
     void showInFileManager(const QString &localPath);
     void updateFolderIcon();
+    void checkStorage();
+    QString storageLine() const;
 
     KationDriveInterface *m_drive;
     KStatusNotifierItem *m_item;
     QMenu *m_menu;
     QAction *m_statusAction;
+    QAction *m_storageAction;
     QAction *m_openFolder;
     QAction *m_openOnline;
     QAction *m_pause;

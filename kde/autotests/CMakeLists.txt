@@ -12,7 +12,7 @@ set(_english "LANGUAGE=en")
 
 add_executable(kationtextstest kationtextstest.cpp)
 target_link_libraries(kationtextstest PRIVATE kation_dbus Qt6::Test)
-add_test(NAME kation-texts COMMAND kationtextstest syncReasons safetyPause problems webUrls)
+add_test(NAME kation-texts COMMAND kationtextstest syncReasons safetyPause problems storage webUrls)
 set_tests_properties(kation-texts PROPERTIES ENVIRONMENT "${_english}")
 # The French catalog compiled by ki18n_install (kde/CMakeLists.txt) in this build.
 # gettext ignores LANGUAGE under the C locale, so any installed locale is set.
@@ -42,7 +42,7 @@ set_tests_properties(kio-protondrive PROPERTIES
 )
 
 add_executable(settingswidgettest settingswidgettest.cpp)
-target_link_libraries(settingswidgettest PRIVATE kation_settings Qt6::Test Qt6::Widgets KF6::KCMUtils KF6::CoreAddons)
+target_link_libraries(settingswidgettest PRIVATE kation_settings Qt6::Test Qt6::Widgets KF6::KCMUtils KF6::CoreAddons KF6::WidgetsAddons)
 target_compile_definitions(settingswidgettest PRIVATE
     KATIOND_EXECUTABLE="${KATIOND_EXECUTABLE}"
     KATION_KCM_PLUGIN="$<TARGET_FILE:kcm_kation>"

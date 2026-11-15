@@ -20,6 +20,7 @@ import { createCaches } from './proton/cache';
 import { getOrGenerateClientUid } from './proton/clientUid';
 import { Credentials } from './proton/credentials/credentials';
 import { PersistedEventsProvider } from './proton/events/providerPersisted';
+import { driveStorageOf, type Storage, type StorageFields } from './service/storage';
 
 /** Same flags as the official CLI build. */
 const FEATURE_FLAGS: Partial<Record<FeatureFlags, boolean>> = {
@@ -84,6 +85,13 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
         onSessionChanged: (listener: () => void) => credentials.on('sessionInfoChanged', listener),
         /** Why kationd cannot work right now (e.g. no keyring), if anything. */
         problem: () => store.problem,
+        /** The signed-in user's Drive storage, read from Proton (/core/v4/users). */
+        async getStorage(): Promise<Storage> {
+            const { User } = await apiClient.authenticatedRequest
+                .get(`${apiClient.baseUrlWithProtocol}/core/v4/users`, { timeout: 30_000 })
+                .json<{ User: StorageFields }>();
+            return driveStorageOf(User);
+        },
         async signOut() {
             // Stop polling first: requests made after the revocation fail with 401.
             await events.stop();

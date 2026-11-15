@@ -6,7 +6,7 @@ set(KF_MIN_VERSION 6.0.0)
 
 find_package(Qt6 ${QT_MIN_VERSION} REQUIRED COMPONENTS Core DBus Widgets)
 find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS
-    Config CoreAddons DBusAddons I18n KCMUtils KIO Notifications StatusNotifierItem WindowSystem
+    Config CoreAddons DBusAddons I18n KCMUtils KIO Notifications StatusNotifierItem WidgetsAddons WindowSystem
 )
 if(BUILD_TESTING)
     find_package(Qt6 ${QT_MIN_VERSION} REQUIRED COMPONENTS Test)

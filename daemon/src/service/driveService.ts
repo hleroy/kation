@@ -56,6 +56,7 @@ export class DriveService {
         private readonly sdk: DriveSdk,
         readonly tree: DriveTree,
         private readonly logger: Logger,
+        private readonly hooks: { onQuotaExceeded?: () => void } = {},
     ) {}
 
     async stat(drivePath: string): Promise<Entry> {
@@ -342,6 +343,11 @@ export class DriveService {
             // The signal given to the uploader aborts the transfer itself.
             const { nodeUid } = await raceAbort(controller.completion(), options.signal);
             return await this.sdk.getNode(nodeUid);
+        } catch (error: unknown) {
+            if (toKationError(error).code === 'QuotaExceeded') {
+                this.hooks.onQuotaExceeded?.();
+            }
+            throw error;
         } finally {
             this.tree.invalidate(parent.uid);
         }

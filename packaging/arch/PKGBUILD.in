@@ -18,7 +18,7 @@ license=(GPL-2.0-or-later MIT LGPL-3.0-or-later)
 depends=(
     gcc-libs glibc hicolor-icon-theme qt6-base
     kcmutils kconfig kcoreaddons kdbusaddons ki18n kio knotifications
-    kstatusnotifieritem kwindowsystem
+    kstatusnotifieritem kwidgetsaddons kwindowsystem
     libsecret  # loaded at run time by kationd (Bun.secrets)
 )
 optdepends=(

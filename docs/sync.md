@@ -59,6 +59,18 @@ If Proton ends the session (it expired, or you signed out from another
 device), sync stops and the Kation window asks you to sign in again; sync
 then resumes where it stopped.
 
+## When your Proton Drive is full
+
+The Kation window, the tray menu and Dolphin's status bar (in the online
+view) show how much of your Proton storage is used. Kation notifies you once
+when it reaches 90%, and again if it gets full.
+
+When Proton refuses an upload for lack of space, sync stops uploading but
+keeps downloading and applying deletions and moves. Files waiting to be
+uploaded show an error emblem in Dolphin. Free up space (files in the Proton
+Drive trash count too) or get more storage: uploads resume within a few
+minutes.
+
 ## Choosing what to sync
 
 - **Folders to Sync:** untick folders in the Kation window (or run

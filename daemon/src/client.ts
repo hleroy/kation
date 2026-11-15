@@ -83,6 +83,25 @@ export function formatRows(rows: Row[]): string[] {
         });
 }
 
+/** "Storage: 1.5 GiB of 5 GiB used (30%)", or "" when unknown. */
+export function formatStorage(used: number, max: number): string {
+    if (used < 0 || max <= 0) {
+        return '';
+    }
+    return `Storage: ${formatBytes(used)} of ${formatBytes(max)} used (${Math.floor((used * 100) / max)}%)`;
+}
+
+function formatBytes(bytes: number): string {
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit++;
+    }
+    return unit === 0 ? `${value} B` : `${Number(value.toFixed(1))} ${units[unit]}`;
+}
+
 export function entryToRow(entry: Record<string, unknown>): Row {
     const size = Number(entry.size ?? -1);
     return {

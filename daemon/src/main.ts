@@ -16,7 +16,7 @@ import { NodeType } from '@protontech/drive-sdk';
 
 import { getVersions, THIRD_PARTY_NOTICE } from './appInfo';
 import { openBrowserUrl } from './browser';
-import { connectService, entryToRow, formatRows, type Row, type ServiceClient, unwrap } from './client';
+import { connectService, entryToRow, formatRows, formatStorage, type Row, type ServiceClient, unwrap } from './client';
 import { getConfig } from './config';
 import { type Drive, openDrive } from './drive';
 import { listFolder, nodeName, resolvePath } from './drivePaths';
@@ -205,8 +205,15 @@ async function runThroughService(service: ServiceClient, command: string, args: 
         }
         case 'status': {
             const status = unwrap(await service.call('GetStatus'));
-            const text = status.loggedIn ? `Signed in as ${printable(String(status.email))}` : 'Not signed in.';
-            print(json, status, status.problem ? `${text}\n${printable(String(status.problem))}` : text);
+            const lines = [status.loggedIn ? `Signed in as ${printable(String(status.email))}` : 'Not signed in.'];
+            const storage = formatStorage(Number(status.storageUsed ?? -1), Number(status.storageMax ?? -1));
+            if (storage) {
+                lines.push(storage);
+            }
+            if (status.problem) {
+                lines.push(printable(String(status.problem)));
+            }
+            print(json, status, lines.join('\n'));
             return;
         }
         case 'login': {

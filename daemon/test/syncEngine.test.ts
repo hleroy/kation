@@ -1841,3 +1841,77 @@ describe('SyncEngine renames and moves', () => {
         expect(ctx.file.parentUid).toBe(child(ctx.fake, ctx.fake.rootUid, 'Locked')!.uid);
     });
 });
+
+describe('SyncEngine with a full storage', () => {
+    async function fullSetup(maxStorage: number) {
+        const fake = new FakeDrive({
+            maxStorage,
+            onEvent: (event) => {
+                for (const listener of events) listener(event);
+            },
+        });
+        let uploads = 0;
+        const getFileUploader = fake.sdk.getFileUploader;
+        fake.sdk.getFileUploader = (...args) => {
+            uploads++;
+            return getFileUploader(...args);
+        };
+        const activity: string[] = [];
+        let errors = 0;
+        const ctx = await setup({
+            fake,
+            onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`.trim()),
+            onStatus: (status) => {
+                errors += status.state === 'error' ? 1 : 0;
+            },
+        });
+        const nextError = async () => {
+            const before = errors;
+            for (let i = 0; i < 200 && errors === before; i++) {
+                await Bun.sleep(5);
+            }
+        };
+        return { ...ctx, activity, uploads: () => uploads, errors: () => errors, nextError };
+    }
+
+    it('stops uploading once Proton refuses a file, still syncs the rest and reports it once', async () => {
+        const ctx = await fullSetup(10);
+        ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'remote.txt', type: NodeType.File, content: 'abc' });
+        await mkdir(ctx.root, { recursive: true });
+        for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+            await edit(ctx.local(name), 'more than the space left');
+        }
+
+        await ctx.engine.start();
+        await untilError(ctx.engine);
+
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'storageFull' });
+        expect(ctx.uploads()).toBe(1);
+        expect(await readFile(ctx.local('remote.txt'), 'utf8')).toBe('abc');
+        expect(ctx.activity).toEqual(['error /a.txt', 'downloaded /remote.txt']);
+        expect(await ctx.engine.itemState('/c.txt')).toBe('error');
+
+        // Still full: the retry tries one upload again and adds no activity.
+        ctx.engine.retryNow();
+        await ctx.nextError();
+        expect(ctx.engine.getStatus().reason).toBe('storageFull');
+        expect(ctx.uploads()).toBe(2);
+        expect(ctx.activity).toHaveLength(2);
+
+        ctx.fake.maxStorage = 1000;
+        ctx.engine.retryNow();
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'idle', reason: '' });
+        expect([...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort()).toEqual(['a.txt', 'b.txt', 'c.txt', 'remote.txt']);
+    });
+
+    it('reports the full storage over other item errors', async () => {
+        const ctx = await fullSetup(0);
+        await mkdir(ctx.root, { recursive: true });
+        await edit(ctx.local('a.txt'), 'x');
+        await ctx.engine.start();
+        await untilError(ctx.engine);
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'storageFull' });
+        expect(ctx.engine.getStatus().message).toContain('storage is full');
+    });
+});

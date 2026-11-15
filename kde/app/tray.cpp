@@ -5,6 +5,7 @@
 #include "kationdriveinterface.h"
 #include "kationtexts.h"
 #include "kationtypes.h"
+#include "kationweb.h"
 
 #include <KConfig>
 #include <KConfigGroup>
@@ -13,6 +14,7 @@
 #include <KIO/OpenUrlJob>
 #include <KLocalizedString>
 #include <KNotification>
+#include <KSharedConfig>
 #include <KStatusNotifierItem>
 
 #include <QAction>
@@ -30,6 +32,9 @@
 namespace
 {
 constexpr int MaxActivityShown = 10;
+// Below these, a storage level notified before is notified again the next time it is reached.
+constexpr int AlmostFullRearmPercent = 85;
+constexpr int FullRearmPercent = 95;
 
 QString activityText(const QVariantMap &activity)
 {
@@ -95,6 +100,8 @@ KationTray::KationTray(QObject *parent)
 
     m_statusAction = m_menu->addAction(QString());
     m_statusAction->setEnabled(false);
+    m_storageAction = m_menu->addAction(QString());
+    m_storageAction->setEnabled(false);
     m_menu->addSeparator();
     m_signIn = m_menu->addAction(QIcon::fromTheme(QStringLiteral("im-user-online")), i18n("Sign In…"), this, &KationTray::settingsRequested);
     m_openFolder = m_menu->addAction(QIcon::fromTheme(QStringLiteral("kation-folder")), i18n("Open Synced Folder"), this, &KationTray::openSyncedFolder);
@@ -117,6 +124,7 @@ KationTray::KationTray(QObject *parent)
     m_item->setStandardActionsEnabled(true);
 
     m_statusAction->setObjectName(QStringLiteral("status"));
+    m_storageAction->setObjectName(QStringLiteral("storage"));
     m_signIn->setObjectName(QStringLiteral("signIn"));
     m_openFolder->setObjectName(QStringLiteral("openFolder"));
     m_openOnline->setObjectName(QStringLiteral("openOnline"));
@@ -200,6 +208,7 @@ void KationTray::showStatus(const QVariantMap &status)
             }
         });
     }
+    checkStorage();
     update();
 }
 
@@ -210,7 +219,9 @@ void KationTray::showSyncStatus(const QVariantMap &status)
     const QString state = status.value(QStringLiteral("state")).toString();
     const QString message = Kation::syncReasonText(status);
 
-    if (state == QLatin1String("error") && previousState != state && !m_notifiedProblems.contains(message)) {
+    // A full storage has its own notification (checkStorage).
+    const bool storageFull = status.value(QStringLiteral("reason")).toString() == QLatin1String("storageFull");
+    if (state == QLatin1String("error") && previousState != state && !storageFull && !m_notifiedProblems.contains(message)) {
         m_notifiedProblems.insert(message);
         notify(QStringLiteral("syncError"), i18n("Some files could not be synced"), message, i18n("Open Settings"), [this] {
             Q_EMIT settingsRequested();
@@ -228,7 +239,53 @@ void KationTray::showSyncStatus(const QVariantMap &status)
         m_notifiedProblems.clear();
     }
     updateFolderIcon();
+    checkStorage();
     update();
+}
+
+void KationTray::checkStorage()
+{
+    const QString email = m_status.value(QStringLiteral("email")).toString();
+    if (!m_status.value(QStringLiteral("loggedIn")).toBool() || email.isEmpty()) {
+        return;
+    }
+    const Kation::StorageLevel level = Kation::storageLevel(m_status, m_syncStatus);
+    if (level == Kation::StorageLevel::Unknown) {
+        return;
+    }
+    // Remembered across restarts: a storage that stays almost full is notified once, not at each login.
+    KConfigGroup group = KSharedConfig::openStateConfig()->group(QStringLiteral("Storage"));
+    auto notified = static_cast<Kation::StorageLevel>(group.readEntry("NotifiedLevel", int(Kation::StorageLevel::Ok)));
+    if (group.readEntry("Account", QString()) != email) {
+        notified = Kation::StorageLevel::Ok;
+    }
+    const int percent = Kation::storagePercent(m_status);
+    // Usage just under a level would otherwise notify again each time it crosses it.
+    if (notified == Kation::StorageLevel::Full && level != Kation::StorageLevel::Full && percent < FullRearmPercent) {
+        notified = Kation::StorageLevel::AlmostFull;
+    }
+    if (notified == Kation::StorageLevel::AlmostFull && level < Kation::StorageLevel::AlmostFull && percent < AlmostFullRearmPercent) {
+        notified = Kation::StorageLevel::Ok;
+    }
+    if (level > notified) {
+        notified = level;
+        const QString title = level == Kation::StorageLevel::Full ? i18n("Proton Drive is full") : i18n("Proton Drive almost full");
+        const QString url = m_status.value(QStringLiteral("storageUrl")).toString();
+        notify(QStringLiteral("storage"), title, Kation::storageWarningText(level), i18n("Manage Storage"), [url] {
+            Kation::openWebUrl(url);
+        });
+    }
+    if (group.readEntry("Account", QString()) != email || group.readEntry("NotifiedLevel", -1) != int(notified)) {
+        group.writeEntry("Account", email);
+        group.writeEntry("NotifiedLevel", int(notified));
+        group.sync();
+    }
+}
+
+QString KationTray::storageLine() const
+{
+    const QString usage = Kation::storageUsageText(m_status);
+    return usage.isEmpty() ? QString() : i18nc("@info tray menu, the storage used", "Storage: %1", usage);
 }
 
 namespace
@@ -371,10 +428,14 @@ void KationTray::update()
     // Shown instead of the icon while the status needs attention.
     m_item->setAttentionIconByName(icon);
     m_item->setStatus(itemStatus);
+    const QString storage = loggedIn ? storageLine() : QString();
     // Plasma guesses the tooltip's format; the status holds file names and kationd's messages.
-    m_item->setToolTip(icon, i18n("Kation"), Qt::convertFromPlainText(statusText(), Qt::WhiteSpaceNormal));
+    const QString tip = storage.isEmpty() ? statusText() : statusText() + QLatin1Char('\n') + storage;
+    m_item->setToolTip(icon, i18n("Kation"), Qt::convertFromPlainText(tip, Qt::WhiteSpaceNormal));
 
     m_statusAction->setText(statusText());
+    m_storageAction->setText(storage);
+    m_storageAction->setVisible(!storage.isEmpty());
     m_signIn->setVisible(m_reachable && !loggedIn);
     m_openFolder->setVisible(syncOn);
     m_openOnline->setVisible(loggedIn);

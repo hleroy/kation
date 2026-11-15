@@ -31,6 +31,8 @@ public:
     KIO::WorkerResult get(const QUrl &url) override;
     KIO::WorkerResult put(const QUrl &url, int permissions, KIO::JobFlags flags) override;
     KIO::WorkerResult copy(const QUrl &src, const QUrl &dest, int permissions, KIO::JobFlags flags) override;
+    /// The Proton Drive storage, which Dolphin shows in its status bar.
+    KIO::WorkerResult fileSystemFreeSpace(const QUrl &url) override;
 
 private:
     /// Waits for a transfer call while reporting its progress to KIO.

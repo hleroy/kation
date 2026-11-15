@@ -10,10 +10,12 @@
 #include <QWidget>
 
 class KAboutData;
+class KMessageWidget;
 class KationDriveInterface;
 class QCheckBox;
 class QGroupBox;
 class QLabel;
+class QProgressBar;
 class QPushButton;
 class QSpinBox;
 class QTabWidget;
@@ -65,6 +67,8 @@ private:
     void refresh();
     void showStatus(const QVariantMap &status);
     void showError(const QString &message);
+    void updateStorage();
+    void openStorageUrl();
     void signIn();
     void cancelSignIn();
     void signOut();
@@ -100,7 +104,14 @@ private:
     QPushButton *m_openFiles;
     QPushButton *m_copyLink;
     QString m_signInUrl;
+    QVariantMap m_status;
     bool m_loggedIn = false;
+
+    QWidget *m_storage;
+    QProgressBar *m_storageBar;
+    QLabel *m_storageText;
+    QLabel *m_manageStorage;
+    KMessageWidget *m_storageWarning;
     bool m_fitting = false;
 
     QGroupBox *m_syncBox;

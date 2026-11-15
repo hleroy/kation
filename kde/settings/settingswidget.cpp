@@ -14,7 +14,9 @@
 #include <KIO/OpenFileManagerWindowJob>
 #include <KIO/OpenUrlJob>
 #include <KLocalizedString>
+#include <KMessageWidget>
 
+#include <QAction>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QDBusPendingCallWatcher>
@@ -24,12 +26,14 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLocale>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScopedValueRollback>
 #include <QSpinBox>
@@ -39,6 +43,8 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QtMath>
+
+#include <algorithm>
 
 namespace
 {
@@ -138,6 +144,11 @@ KationSettingsWidget::KationSettingsWidget(QWidget *parent)
     , m_signOut(new QPushButton(QIcon::fromTheme(QStringLiteral("system-log-out")), i18n("Sign Out"), this))
     , m_openFiles(new QPushButton(QIcon::fromTheme(QStringLiteral("kation-folder")), i18n("Open Files"), this))
     , m_copyLink(new QPushButton(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Copy Link"), this))
+    , m_storage(new QWidget(this))
+    , m_storageBar(new QProgressBar(m_storage))
+    , m_storageText(new QLabel(m_storage))
+    , m_manageStorage(new QLabel(m_storage))
+    , m_storageWarning(new KMessageWidget(this))
     , m_syncBox(new QGroupBox(i18n("Folder Sync"), this))
     , m_syncFolder(new QLabel(m_syncBox))
     , m_syncState(new QLabel(m_syncBox))
@@ -204,6 +215,8 @@ KationSettingsWidget::KationSettingsWidget(QWidget *parent)
     m_copyLink->hide();
     m_syncBox->hide();
     m_online->hide();
+    m_storage->hide();
+    m_storageWarning->hide();
     m_savedTrayAtLogin = Kation::trayAtLogin();
     m_trayAtLogin->setChecked(m_savedTrayAtLogin);
     refresh();
@@ -228,6 +241,31 @@ void KationSettingsWidget::buildGeneralTab(QWidget *tab)
     m_syncChooseFolder->setObjectName(QStringLiteral("syncChooseFolder"));
     m_online->setObjectName(QStringLiteral("online"));
     m_notice->setObjectName(QStringLiteral("notice"));
+    m_storage->setObjectName(QStringLiteral("storage"));
+    m_storageBar->setObjectName(QStringLiteral("storageBar"));
+    m_storageText->setObjectName(QStringLiteral("storageText"));
+    m_storageWarning->setObjectName(QStringLiteral("storageWarning"));
+
+    m_storageBar->setRange(0, 1000);
+    m_storageBar->setTextVisible(false);
+    m_manageStorage->setText(QStringLiteral("<a href=\"storage\">%1</a>").arg(i18n("Manage Storage").toHtmlEscaped()));
+    auto storageTitle = new QLabel(i18nc("@label Proton Drive storage", "Storage:"), m_storage);
+    auto storageRow = new QHBoxLayout;
+    storageRow->addWidget(m_storageText);
+    storageRow->addStretch();
+    storageRow->addWidget(m_manageStorage);
+    auto storageLayout = new QGridLayout(m_storage);
+    storageLayout->setContentsMargins(0, 0, 0, 0);
+    storageLayout->addWidget(storageTitle, 0, 0);
+    storageLayout->addWidget(m_storageBar, 0, 1);
+    storageLayout->addLayout(storageRow, 1, 1);
+    storageLayout->setColumnStretch(1, 1);
+    m_storageWarning->setWordWrap(true);
+    m_storageWarning->setCloseButtonVisible(false);
+    auto manageStorage = new QAction(QIcon::fromTheme(QStringLiteral("internet-services")), i18n("Manage Storage"), m_storageWarning);
+    m_storageWarning->addAction(manageStorage);
+    connect(manageStorage, &QAction::triggered, this, &KationSettingsWidget::openStorageUrl);
+    connect(m_manageStorage, &QLabel::linkActivated, this, &KationSettingsWidget::openStorageUrl);
 
     m_online->setWordWrap(true);
     m_online->setText(
@@ -269,6 +307,8 @@ void KationSettingsWidget::buildGeneralTab(QWidget *tab)
     layout->addWidget(m_state);
     layout->addWidget(m_details);
     layout->addSpacing(8);
+    layout->addWidget(m_storage);
+    layout->addWidget(m_storageWarning);
     layout->addWidget(m_syncBox);
     layout->addWidget(m_online);
     layout->addSpacing(8);
@@ -604,6 +644,7 @@ void KationSettingsWidget::showStatus(const QVariantMap &status)
 {
     const bool loggedIn = status.value(QStringLiteral("loggedIn")).toBool();
     const bool pending = status.value(QStringLiteral("loginPending")).toBool();
+    m_status = status;
     m_signInUrl = status.value(QStringLiteral("signInUrl")).toString();
     m_reportedAppVersion = status.value(QStringLiteral("appVersion")).toString();
     m_reportedSdkVersion = status.value(QStringLiteral("sdkVersion")).toString();
@@ -651,7 +692,36 @@ void KationSettingsWidget::showStatus(const QVariantMap &status)
     if (!problem.isEmpty()) {
         showError(problem);
     }
+    updateStorage();
     fitToContents();
+}
+
+void KationSettingsWidget::updateStorage()
+{
+    const bool loggedIn = m_status.value(QStringLiteral("loggedIn")).toBool();
+    // The sync status says when Proton refused uploads; it is stale while signed out.
+    const Kation::StorageLevel level = loggedIn ? Kation::storageLevel(m_status, m_syncStatus) : Kation::StorageLevel::Unknown;
+    const bool known = Kation::storagePercent(m_status) >= 0;
+    m_storage->setVisible(loggedIn && known);
+    if (known) {
+        const qint64 used = m_status.value(QStringLiteral("storageUsed")).toLongLong();
+        const qint64 max = m_status.value(QStringLiteral("storageMax")).toLongLong();
+        m_storageBar->setValue(int(std::min<qint64>(used * 1000 / max, 1000)));
+    }
+    m_storageText->setText(Kation::storageUsageText(m_status));
+    m_manageStorage->setVisible(Kation::isWebUrl(m_status.value(QStringLiteral("storageUrl")).toString()));
+
+    const QString warning = Kation::storageWarningText(level);
+    m_storageWarning->setMessageType(level == Kation::StorageLevel::Full ? KMessageWidget::Error : KMessageWidget::Warning);
+    m_storageWarning->setText(warning);
+    m_storageWarning->setVisible(!warning.isEmpty());
+}
+
+void KationSettingsWidget::openStorageUrl()
+{
+    if (!Kation::openWebUrl(m_status.value(QStringLiteral("storageUrl")).toString())) {
+        showError(Kation::refusedWebUrlText());
+    }
 }
 
 void KationSettingsWidget::showError(const QString &message)
@@ -741,6 +811,7 @@ void KationSettingsWidget::refreshSync()
 void KationSettingsWidget::showSyncStatus(const QVariantMap &status)
 {
     m_syncStatus = status;
+    updateStorage();
     const bool enabled = status.value(QStringLiteral("enabled")).toBool();
     const bool paused = status.value(QStringLiteral("paused")).toBool();
     const QString state = status.value(QStringLiteral("state")).toString();

@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kation 0.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/hleroy/kation/issues\n"
-"POT-Creation-Date: 2026-11-14 19:36+0100\n"
+"POT-Creation-Date: 2026-11-15 18:09+0100\n"
 "PO-Revision-Date: 2026-11-01 23:30+0100\n"
 "Last-Translator: Kation contributors\n"
 "Language-Team: French <kde-francophone@kde.org>\n"
@@ -123,6 +123,27 @@ msgstr "Certains fichiers n'ont pas pu être synchronisés"
 #, kde-format
 msgid "Sync paused"
 msgstr "Synchronisation en pause"
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Proton Drive almost full"
+msgstr "Proton Drive presque plein"
+
+#: kde/app/tray.cpp
+#, kde-format
+msgid "Proton Drive is full"
+msgstr "Proton Drive est plein"
+
+#: kde/app/tray.cpp kde/settings/settingswidget.cpp
+#, kde-format
+msgid "Manage Storage"
+msgstr "Gérer le stockage"
+
+#: kde/app/tray.cpp
+#, kde-format
+msgctxt "@info tray menu, the storage used"
+msgid "Storage: %1"
+msgstr "Stockage : %1"
 
 #: kde/app/tray.cpp
 #, kde-format
@@ -281,6 +302,12 @@ msgstr "Certains éléments n'ont pas pu être synchronisés."
 #: kde/dbus/kationtexts.cpp
 #, kde-format
 msgid ""
+"Your Proton Drive storage is full: files you add or change are not uploaded."
+msgstr "Votre stockage Proton Drive est plein : les fichiers que vous ajoutez ou modifiez ne sont pas envoyés."
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
 "A symbolic link in the sync folder has the same name as an item in Proton "
 "Drive. Kation does not sync symbolic links, so that item is not synced "
 "either: rename or remove the link."
@@ -315,6 +342,27 @@ msgstr ""
 msgctxt "@info a problem, then the error behind it"
 msgid "%1 (%2)"
 msgstr "%1 (%2)"
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgctxt "@info storage: used, total, percentage used"
+msgid "%1 of %2 used (%3%)"
+msgstr "%1 sur %2 utilisés (%3 %)"
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"Your Proton Drive storage is almost full. Once it is full, files you add or "
+"change are no longer uploaded."
+msgstr "Votre stockage Proton Drive est presque plein. Une fois plein, les fichiers que vous ajoutez ou modifiez ne seront plus envoyés."
+
+#: kde/dbus/kationtexts.cpp
+#, kde-format
+msgid ""
+"Your Proton Drive storage is full: files you add or change are not uploaded. "
+"Free up space (files in the Proton Drive trash count too) or get more "
+"storage."
+msgstr "Votre stockage Proton Drive est plein : les fichiers que vous ajoutez ou modifiez ne sont pas envoyés. Libérez de l'espace (les fichiers dans la corbeille de Proton Drive comptent aussi) ou obtenez plus de stockage."
 
 #: kde/dbus/kationweb.cpp
 #, kde-format
@@ -509,6 +557,12 @@ msgstr "À propos"
 #, kde-format
 msgid "Connecting…"
 msgstr "Connexion…"
+
+#: kde/settings/settingswidget.cpp
+#, kde-format
+msgctxt "@label Proton Drive storage"
+msgid "Storage:"
+msgstr "Stockage :"
 
 #: kde/settings/settingswidget.cpp
 #, kde-format

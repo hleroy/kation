@@ -54,7 +54,8 @@ On Debian 13 and Debian derivatives with Plasma 6 (such as KDE neon):
 sudo apt install git cmake g++ make extra-cmake-modules gettext \
     qt6-base-dev libkf6kio-dev libkf6coreaddons-dev libkf6i18n-dev \
     libkf6config-dev libkf6dbusaddons-dev libkf6kcmutils-dev \
-    libkf6notifications-dev libkf6statusnotifieritem-dev libkf6windowsystem-dev
+    libkf6notifications-dev libkf6statusnotifieritem-dev libkf6widgetsaddons-dev \
+    libkf6windowsystem-dev
 ```
 
 On Fedora:
@@ -63,7 +64,7 @@ On Fedora:
 sudo dnf install git cmake gcc-c++ make extra-cmake-modules gettext qt6-qtbase-devel \
     kf6-kio-devel kf6-kcoreaddons-devel kf6-ki18n-devel kf6-kconfig-devel \
     kf6-kdbusaddons-devel kf6-kcmutils-devel kf6-knotifications-devel \
-    kf6-kstatusnotifieritem-devel kf6-kwindowsystem-devel
+    kf6-kstatusnotifieritem-devel kf6-kwidgetsaddons-devel kf6-kwindowsystem-devel
 ```
 
 On Arch Linux:
@@ -71,7 +72,7 @@ On Arch Linux:
 ```sh
 sudo pacman -S --needed base-devel git cmake extra-cmake-modules gettext bun \
     qt6-base kio kcoreaddons ki18n kconfig kdbusaddons kcmutils knotifications \
-    kstatusnotifieritem kwindowsystem libsecret
+    kstatusnotifieritem kwidgetsaddons kwindowsystem libsecret
 ```
 
 ## Building and installing from source
