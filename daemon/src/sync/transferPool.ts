@@ -55,7 +55,6 @@ export class TransferPool {
         }
     }
 
-    /** Jobs running now. */
     get size(): number {
         return this.active.size;
     }

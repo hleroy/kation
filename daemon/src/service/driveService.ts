@@ -59,7 +59,6 @@ export class DriveService {
     /** Speed limits shared by all transfers (sync and online view), set from the settings. */
     readonly uploadLimiter = new RateLimiter();
     readonly downloadLimiter = new RateLimiter();
-    /** Bytes of the uploads in progress. */
     private uploadingBytes = 0;
     /** Bytes of ended uploads that the latest reading may not count, by the number of the first reading that does. */
     private uploadedBytes: { countedFrom: number; bytes: number }[] = [];

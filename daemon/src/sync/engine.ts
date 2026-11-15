@@ -835,6 +835,10 @@ export class SyncEngine {
         let gone: LocalFolderGone | undefined;
         const startFile: StartFile = async (itemPath, work) => {
             const { done } = await this.transfers.run(async () => {
+                if (gone) {
+                    // The walk was already waiting for this slot: a download would recreate the folder.
+                    return;
+                }
                 try {
                     await work();
                 } catch (error: unknown) {
@@ -895,11 +899,12 @@ export class SyncEngine {
             }
         }
         await Promise.all(jobs);
-        if (walkError !== undefined) {
-            throw walkError;
-        }
+        // Before walkError, which may be only the cancellation it caused.
         if (this.passFailure !== undefined) {
             throw this.passFailure;
+        }
+        if (walkError !== undefined) {
+            throw walkError;
         }
         if (gone) {
             throw gone;
@@ -992,7 +997,8 @@ export class SyncEngine {
     private failPass(error: unknown): void {
         if (!this.transfers.signal.aborted) {
             this.passFailure = error;
-            this.transfers.abort(error);
+            // Cancelled, not the error itself: the items cut short must not be reported with it.
+            this.transfers.abort(new KationError('Cancelled', 'The sync pass ended'));
         }
     }
 
@@ -1171,12 +1177,17 @@ export class SyncEngine {
                     this.options.state.removeTree(itemPath);
                     return;
                 }
-                // A promise: its files' uploads may ask for it at the same time.
+                // A promise: its files' uploads may ask for it at the same time. Forgotten on failure, so the next one tries again.
                 let recreating: Promise<NodeEntity> | undefined;
                 const context: FolderContext = {
                     path: itemPath,
                     ensureRemote: () =>
-                        (recreating ??= (async () => this.options.drive.createFolderIn(await parent.ensureRemote(), name))()),
+                        (recreating ??= (async () => this.options.drive.createFolderIn(await parent.ensureRemote(), name))().catch(
+                            (error: unknown) => {
+                                recreating = undefined;
+                                throw error;
+                            },
+                        )),
                 };
                 // Children still have their base: unchanged ones follow the deletion, changed ones are uploaded.
                 await this.reconcileFolder(context, 'empty', true, true, errors);
