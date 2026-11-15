@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-15
+
+### TL;DR
+
+Kation shows how much of your Proton storage is used and warns you before it is full, and sync recognises renames and moves instead of transferring files again. Upgrading the package now restarts Kation's background service (and, from this version on, the tray app) so the new version runs without logging out.
+
 ### Added
 
 - An About tab with the versions of Kation, its background service, the Proton Drive SDK, Qt, KDE Frameworks and the system (and a button that copies them for bug reports), the log file, links and licenses.
@@ -93,7 +99,8 @@ Initial release; its scope is in [ROADMAP.md](ROADMAP.md).
 - Debian, Fedora and Arch packages: `./build-package.sh` builds one for the distribution it runs on.
 - GitHub releases come with packages for Debian 13, Fedora 43 and Arch Linux.
 
-[Unreleased]: https://github.com/hleroy/kation/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/hleroy/kation/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/hleroy/kation/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/hleroy/kation/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/hleroy/kation/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hleroy/kation/releases/tag/v0.1.0
