@@ -129,9 +129,10 @@
       could not be synced, "links" items are not synced because a symbolic
       link or special file in the sync folder has their name,
       "storageFull" Proton refused uploads because the storage is full
-      (other changes are still synced), "" see message), deletionLimit u, current s (path
-      being transferred), pending u (folders waiting), lastSync x (seconds
-      since the epoch, 0 if never),
+      (other changes are still synced), "" see message), deletionLimit u,
+      current s (one of the paths being transferred, the one started last;
+      "" if none), pending u (folders waiting), lastSync x (seconds since the
+      epoch, 0 if never),
       uploadLimit u, downloadLimit u (KiB/s for all transfers, 0: unlimited).
     -->
     <method name="GetSyncStatus">

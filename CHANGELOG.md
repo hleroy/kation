@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Sync transfers up to 4 files at once, so folders of many small files sync much faster; uploads that would not fit in the remaining storage are not started.
+
 ## [0.4.0] - 2026-11-15
 
 ### TL;DR

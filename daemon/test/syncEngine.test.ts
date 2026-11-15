@@ -8,10 +8,12 @@ import path from 'node:path';
 
 import { DriveEventType, NodeType } from '@protontech/drive-sdk';
 
-import { DriveService } from '../src/service/driveService';
+import { DriveService, type DriveServiceHooks } from '../src/service/driveService';
+import { KationError } from '../src/service/errors';
 import { FakeDrive } from '../src/service/fakeDrive';
+import { StorageMonitor } from '../src/service/storage';
 import { DriveTree } from '../src/service/tree';
-import { foldersForLog, SAFETY_PAUSE_META, SyncEngine, type SyncEngineOptions } from '../src/sync/engine';
+import { foldersForLog, MAX_PARALLEL_TRANSFERS, SAFETY_PAUSE_META, SyncEngine, type SyncEngineOptions } from '../src/sync/engine';
 import { moveToTrash } from '../src/sync/local';
 import { SyncState } from '../src/sync/state';
 import { countingSdk, silentLogger, tempDir } from './helpers';
@@ -21,7 +23,9 @@ afterEach(async () => {
     await Promise.all(engines.splice(0).map((engine) => engine.stop()));
 });
 
-async function setup(options: Partial<SyncEngineOptions> & { fake?: FakeDrive; stateFile?: string; root?: string } = {}) {
+async function setup(
+    options: Partial<SyncEngineOptions> & { fake?: FakeDrive; stateFile?: string; root?: string; driveHooks?: DriveServiceHooks } = {},
+) {
     const fake =
         options.fake ??
         new FakeDrive({
@@ -31,7 +35,7 @@ async function setup(options: Partial<SyncEngineOptions> & { fake?: FakeDrive; s
         });
     const counting = countingSdk(fake.sdk);
     const tree = new DriveTree(counting.sdk, silentLogger);
-    const drive = new DriveService(counting.sdk, tree, silentLogger);
+    const drive = new DriveService(counting.sdk, tree, silentLogger, options.driveHooks);
     const root = options.root ?? path.join(await tempDir(), 'Proton Drive');
     const trashHome = await tempDir();
     const state = new SyncState(options.stateFile ?? path.join(await tempDir(), 'sync.sqlite'));
@@ -383,22 +387,26 @@ describe('SyncEngine', () => {
             ...silentLogger,
             info: (message: string) => {
                 log.push(message);
-                if (message === 'Uploading /Test/a.txt') {
-                    rmSync(ctx.local('Test/sub1'), { recursive: true });
+                if (message.startsWith('Uploading /Test/')) {
+                    rmSync(ctx.local('Test/sub1'), { recursive: true, force: true });
                 }
             },
         };
         const ctx = await setup({ logger });
         await mkdir(ctx.local('Test/sub1'), { recursive: true });
-        await edit(ctx.local('Test/a.txt'), 'a');
+        // One more file than transfers at once: sub1 is reached once an upload has ended, after the first one began.
+        const files = Array.from({ length: MAX_PARALLEL_TRANSFERS + 1 }, (_, i) => `a${i}.txt`);
+        for (const name of files) {
+            await edit(ctx.local(`Test/${name}`), name);
+        }
         await ctx.engine.start();
         await ctx.settle();
 
-        expect(log.filter((line) => !line.startsWith('Sync pass'))).toEqual([
-            'Uploading /Test/a.txt',
+        expect(log.filter((line) => !line.startsWith('Sync pass')).sort()).toEqual([
             '/Test/sub1 was removed here during sync; checking again',
+            ...files.map((name) => `Uploading /Test/${name}`),
         ]);
-        expect([...ctx.fake.childrenOf(child(ctx.fake, ctx.fake.rootUid, 'Test')!.uid).keys()]).toEqual(['a.txt']);
+        expect([...ctx.fake.childrenOf(child(ctx.fake, ctx.fake.rootUid, 'Test')!.uid).keys()].sort()).toEqual(files);
         expect(ctx.engine.getStatus().state).toBe('idle');
     });
 
@@ -490,9 +498,9 @@ describe('SyncEngine', () => {
         ctx.engine.onLocalChange('/a.txt');
         await ctx.settle();
 
-        expect(log.filter((line) => !line.startsWith('info Sync pass'))).toEqual([
-            'info Uploading /a.txt',
+        expect(log.filter((line) => !line.startsWith('info Sync pass')).sort()).toEqual([
             'info /a.txt was removed here during sync; checking again',
+            'info Uploading /a.txt',
             'info Uploading /b.txt',
         ]);
         expect(child(ctx.fake, ctx.fake.rootUid, 'a.txt')).toBeUndefined();
@@ -506,22 +514,26 @@ describe('SyncEngine', () => {
             ...silentLogger,
             info: (message: string) => {
                 log.push(message);
-                if (message === 'Uploading /a.txt') {
-                    rmSync(ctx.local('b.txt'));
+                if (message.startsWith('Uploading /a')) {
+                    rmSync(ctx.local('b.txt'), { force: true });
                 }
             },
         };
         const ctx = await setup({ logger });
         await ctx.engine.start();
         await ctx.settle();
-        await edit(ctx.local('a.txt'), 'a');
+        // As many files before b.txt as transfers at once: b.txt waits for one of their uploads to end.
+        const files = Array.from({ length: MAX_PARALLEL_TRANSFERS }, (_, i) => `a${i}.txt`);
+        for (const name of files) {
+            await edit(ctx.local(name), name);
+        }
         await edit(ctx.local('b.txt'), 'b');
-        ctx.engine.onLocalChange('/a.txt');
+        ctx.engine.onLocalChange('/a0.txt');
         await ctx.settle();
 
-        expect(log.filter((line) => !line.startsWith('Sync pass'))).toEqual([
-            'Uploading /a.txt',
+        expect(log.filter((line) => !line.startsWith('Sync pass')).sort()).toEqual([
             '/b.txt was removed here during sync; checking again',
+            ...files.map((name) => `Uploading /${name}`),
         ]);
         expect(ctx.engine.getStatus().state).toBe('idle');
     });
@@ -1878,7 +1890,9 @@ describe('SyncEngine with a full storage', () => {
         const ctx = await fullSetup(10);
         ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'remote.txt', type: NodeType.File, content: 'abc' });
         await mkdir(ctx.root, { recursive: true });
-        for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+        // More files than transfers at once: those that start after the refusal are not tried.
+        const names = Array.from({ length: MAX_PARALLEL_TRANSFERS + 2 }, (_, i) => `${String.fromCharCode(97 + i)}.txt`);
+        for (const name of names) {
             await edit(ctx.local(name), 'more than the space left');
         }
 
@@ -1886,23 +1900,28 @@ describe('SyncEngine with a full storage', () => {
         await untilError(ctx.engine);
 
         expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'storageFull' });
-        expect(ctx.uploads()).toBe(1);
+        expect(ctx.uploads()).toBe(MAX_PARALLEL_TRANSFERS);
         expect(await readFile(ctx.local('remote.txt'), 'utf8')).toBe('abc');
-        expect(ctx.activity).toEqual(['error /a.txt', 'downloaded /remote.txt']);
-        expect(await ctx.engine.itemState('/c.txt')).toBe('error');
+        // Whichever of the uploads running at once was refused first.
+        expect(ctx.activity).toHaveLength(2);
+        expect(ctx.activity).toContain('downloaded /remote.txt');
+        expect(names.slice(0, MAX_PARALLEL_TRANSFERS).map((name) => `error /${name}`)).toContain(
+            ctx.activity.find((line) => line.startsWith('error'))!,
+        );
+        expect(await ctx.engine.itemState(`/${names.at(-1)}`)).toBe('error');
 
-        // Still full: the retry tries one upload again and adds no activity.
+        // Still full: the retry tries as many uploads again and adds no activity.
         ctx.engine.retryNow();
         await ctx.nextError();
         expect(ctx.engine.getStatus().reason).toBe('storageFull');
-        expect(ctx.uploads()).toBe(2);
+        expect(ctx.uploads()).toBe(2 * MAX_PARALLEL_TRANSFERS);
         expect(ctx.activity).toHaveLength(2);
 
         ctx.fake.maxStorage = 1000;
         ctx.engine.retryNow();
         await ctx.settle();
         expect(ctx.engine.getStatus()).toMatchObject({ state: 'idle', reason: '' });
-        expect([...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort()).toEqual(['a.txt', 'b.txt', 'c.txt', 'remote.txt']);
+        expect([...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort()).toEqual([...names, 'remote.txt']);
     });
 
     it('reports the full storage over other item errors', async () => {
@@ -1913,5 +1932,380 @@ describe('SyncEngine with a full storage', () => {
         await untilError(ctx.engine);
         expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'storageFull' });
         expect(ctx.engine.getStatus().message).toContain('storage is full');
+    });
+});
+
+describe('SyncEngine parallel transfers', () => {
+    function slowFake(chunkDelayMs = 20) {
+        return new FakeDrive({
+            chunkDelayMs,
+            onEvent: (event) => {
+                for (const listener of events) listener(event);
+            },
+        });
+    }
+
+    /** Counts the transfers running at once, by direction. */
+    function countTransfers(drive: DriveService) {
+        const running = { upload: 0, download: 0, total: 0 };
+        const peak = { upload: 0, download: 0, total: 0 };
+        const ended: string[] = [];
+        const track = <T>(kind: 'upload' | 'download', name: string, transfer: () => Promise<T>) => {
+            running[kind]++;
+            running.total++;
+            peak[kind] = Math.max(peak[kind], running[kind]);
+            peak.total = Math.max(peak.total, running.total);
+            return transfer().finally(() => {
+                running[kind]--;
+                running.total--;
+                ended.push(name);
+            });
+        };
+        const { uploadFile, downloadNode } = drive;
+        drive.uploadFile = (parent, name, ...rest) => track('upload', name, () => uploadFile.call(drive, parent, name, ...rest));
+        drive.downloadNode = (node, localPath, ...rest) =>
+            track('download', path.basename(localPath), () => downloadNode.call(drive, node, localPath, ...rest));
+        return { running, peak, ended };
+    }
+
+    const names = (prefix: string, count = 12) => Array.from({ length: count }, (_, i) => `${prefix}${String(i).padStart(2, '0')}.txt`);
+
+    it(`uploads ${MAX_PARALLEL_TRANSFERS} files at once, never more`, async () => {
+        const ctx = await setup({ fake: slowFake() });
+        const transfers = countTransfers(ctx.drive);
+        await mkdir(ctx.local('Docs'), { recursive: true });
+        for (const name of names('up')) {
+            await edit(ctx.local(`Docs/${name}`), name);
+        }
+        await ctx.engine.start();
+        await ctx.settle();
+
+        expect(transfers.peak.upload).toBe(MAX_PARALLEL_TRANSFERS);
+        const docs = child(ctx.fake, ctx.fake.rootUid, 'Docs')!;
+        expect([...ctx.fake.childrenOf(docs.uid).keys()].sort()).toEqual(names('up'));
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'idle', current: '' });
+    });
+
+    it(`downloads ${MAX_PARALLEL_TRANSFERS} files at once, never more`, async () => {
+        const ctx = await setup({ fake: slowFake() });
+        const transfers = countTransfers(ctx.drive);
+        const docs = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Docs', type: NodeType.Folder });
+        for (const name of names('down')) {
+            ctx.fake.add({ parentUid: docs.uid, name, type: NodeType.File, content: name });
+        }
+        await ctx.engine.start();
+        await ctx.settle();
+
+        expect(transfers.peak.download).toBe(MAX_PARALLEL_TRANSFERS);
+        expect((await readdir(ctx.local('Docs'))).sort()).toEqual(names('down'));
+    });
+
+    it(`counts uploads and downloads together, ${MAX_PARALLEL_TRANSFERS} at once`, async () => {
+        const ctx = await setup({ fake: slowFake() });
+        const transfers = countTransfers(ctx.drive);
+        const docs = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Docs', type: NodeType.Folder });
+        // Interleaved by name: both directions run at the same time.
+        const remote = names('m', 12).filter((_, i) => i % 2 === 0);
+        const local = names('m', 12).filter((_, i) => i % 2 === 1);
+        for (const name of remote) {
+            ctx.fake.add({ parentUid: docs.uid, name, type: NodeType.File, content: name });
+        }
+        await mkdir(ctx.local('Docs'), { recursive: true });
+        for (const name of local) {
+            await edit(ctx.local(`Docs/${name}`), name);
+        }
+        await ctx.engine.start();
+        await ctx.settle();
+
+        expect(transfers.peak.total).toBe(MAX_PARALLEL_TRANSFERS);
+        expect(transfers.peak.upload).toBeGreaterThan(0);
+        expect(transfers.peak.download).toBeGreaterThan(0);
+        expect(transfers.peak.upload + transfers.peak.download).toBeGreaterThan(MAX_PARALLEL_TRANSFERS / 2);
+        expect([...ctx.fake.childrenOf(docs.uid).keys()].sort()).toEqual(names('m'));
+        expect((await readdir(ctx.local('Docs'))).sort()).toEqual(names('m'));
+    });
+
+    it('shows every running file and its folders as syncing', async () => {
+        const ctx = await setup({ fake: slowFake(40) });
+        const transfers = countTransfers(ctx.drive);
+        const docs = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'Docs', type: NodeType.Folder });
+        const files = names('s', MAX_PARALLEL_TRANSFERS);
+        for (const name of files) {
+            // Two chunks: long enough to look at.
+            ctx.fake.add({ parentUid: docs.uid, name, type: NodeType.File, content: new Uint8Array(100 * 1024) });
+        }
+        await ctx.engine.start();
+        for (let i = 0; i < 200 && transfers.running.download < MAX_PARALLEL_TRANSFERS; i++) {
+            await Bun.sleep(2);
+        }
+        expect(transfers.running.download).toBe(MAX_PARALLEL_TRANSFERS);
+        for (const name of files) {
+            expect(await ctx.engine.itemState(`/Docs/${name}`)).toBe('syncing');
+        }
+        expect(await ctx.engine.itemState('/Docs')).toBe('syncing');
+        expect(await ctx.engine.itemState('/')).toBe('syncing');
+        expect(files.map((name) => `/Docs/${name}`)).toContain(ctx.engine.getStatus().current);
+        await ctx.settle();
+        for (const name of files) {
+            expect(await ctx.engine.itemState(`/Docs/${name}`)).toBe('synced');
+        }
+        expect(ctx.engine.getStatus().current).toBe('');
+    });
+
+    it('reports one failing transfer as before and still transfers the others', async () => {
+        const activity: string[] = [];
+        const ctx = await setup({
+            fake: slowFake(5),
+            onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`.trim()),
+        });
+        let failing = true;
+        const uploadFile = ctx.drive.uploadFile.bind(ctx.drive);
+        ctx.drive.uploadFile = async (parent, name, ...rest) => {
+            if (failing && name === 'up03.txt') {
+                await Bun.sleep(10);
+                throw new KationError('Failed', 'Proton said no');
+            }
+            return uploadFile(parent, name, ...rest);
+        };
+        await mkdir(ctx.root, { recursive: true });
+        for (const name of names('up', 8)) {
+            await edit(ctx.local(name), name);
+        }
+        await ctx.engine.start();
+        await untilError(ctx.engine);
+
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: '', message: '/up03.txt: Proton said no' });
+        expect(activity.filter((line) => line.startsWith('error'))).toEqual(['error /up03.txt Proton said no']);
+        expect([...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort()).toEqual(names('up', 8).filter((name) => name !== 'up03.txt'));
+        expect(await ctx.engine.itemState('/up03.txt')).toBe('error');
+
+        failing = false;
+        ctx.engine.retryNow();
+        await ctx.settle();
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'idle', reason: '' });
+        expect([...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort()).toEqual(names('up', 8));
+        expect(await ctx.engine.itemState('/up03.txt')).toBe('synced');
+    });
+
+    it('ends the pass on a connection error, cancelling the other transfers without reporting them', async () => {
+        const activity: string[] = [];
+        const ctx = await setup({
+            fake: slowFake(20),
+            onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`.trim()),
+        });
+        const transfers = countTransfers(ctx.drive);
+        let failing = true;
+        const cancelled: string[] = [];
+        const uploadFile = ctx.drive.uploadFile;
+        ctx.drive.uploadFile = async (parent, name, localPath, existing, options) => {
+            if (failing && name === 'up01.txt') {
+                await Bun.sleep(15);
+                throw new KationError('Connection', 'Offline');
+            }
+            try {
+                return await uploadFile.call(ctx.drive, parent, name, localPath, existing, options);
+            } catch (error) {
+                if (options?.signal?.aborted) {
+                    cancelled.push(name);
+                }
+                throw error;
+            }
+        };
+        await mkdir(ctx.root, { recursive: true });
+        for (const name of names('up', 8)) {
+            // Several chunks each: still running when the connection fails.
+            await writeFile(ctx.local(name), new Uint8Array(200 * 1024));
+            const past = new Date(Date.now() - 60_000);
+            await utimes(ctx.local(name), past, past);
+        }
+        await ctx.engine.start();
+        await untilError(ctx.engine);
+
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', message: 'Offline', reason: '' });
+        expect(transfers.running.total).toBe(0);
+        expect(cancelled.length).toBeGreaterThan(0);
+        // Neither the failure nor the cancelled files are item errors.
+        expect(activity.filter((line) => line.startsWith('error'))).toEqual([]);
+        for (const name of names('up', 8)) {
+            expect(await ctx.engine.itemState(`/${name}`)).not.toBe('error');
+        }
+        // No new transfer started after the failure.
+        expect(transfers.ended.length).toBeLessThanOrEqual(MAX_PARALLEL_TRANSFERS);
+
+        failing = false;
+        ctx.engine.retryNow();
+        await ctx.settle();
+        expect(ctx.engine.getStatus().state).toBe('idle');
+        expect([...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort()).toEqual(names('up', 8));
+    });
+
+    for (const how of ['pause', 'stop'] as const) {
+        it(`writes nothing once ${how === 'pause' ? 'paused' : 'stopped'} during transfers${how === 'pause' ? ', and resumes them' : ''}`, async () => {
+            const ctx = await setup({ fake: slowFake(20) });
+            const transfers = countTransfers(ctx.drive);
+            for (const name of names('d', 8)) {
+                ctx.fake.add({ parentUid: ctx.fake.rootUid, name, type: NodeType.File, content: new Uint8Array(200 * 1024) });
+            }
+            await mkdir(ctx.root, { recursive: true });
+            for (const name of names('u', 8)) {
+                await writeFile(ctx.local(name), new Uint8Array(200 * 1024));
+                const past = new Date(Date.now() - 60_000);
+                await utimes(ctx.local(name), past, past);
+            }
+            await ctx.engine.start();
+            for (let i = 0; i < 200 && transfers.running.total < MAX_PARALLEL_TRANSFERS; i++) {
+                await Bun.sleep(2);
+            }
+            expect(transfers.running.total).toBe(MAX_PARALLEL_TRANSFERS);
+
+            let writes = 0;
+            const { put, removeTree } = ctx.state;
+            if (how === 'pause') {
+                ctx.engine.setPaused(true);
+                await ctx.engine.whenIdle();
+            } else {
+                await ctx.engine.stop();
+            }
+            ctx.state.put = (...args) => {
+                writes++;
+                return put.apply(ctx.state, args);
+            };
+            ctx.state.removeTree = (...args) => {
+                writes++;
+                return removeTree.apply(ctx.state, args);
+            };
+            expect(transfers.running.total).toBe(0);
+            const listing = async () => (await readdir(ctx.root)).sort();
+            const before = await listing();
+            await Bun.sleep(150);
+            expect(writes).toBe(0);
+            expect(await listing()).toEqual(before);
+            expect(ctx.engine.getStatus().current).toBe('');
+
+            if (how === 'pause') {
+                ctx.engine.setPaused(false);
+                await ctx.settle();
+                expect(ctx.engine.getStatus().state).toBe('idle');
+                expect([...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort()).toEqual([...names('d', 8), ...names('u', 8)]);
+                expect((await listing()).filter((name) => !name.startsWith('.'))).toEqual([...names('d', 8), ...names('u', 8)]);
+            }
+        });
+    }
+
+    it('waits for running transfers before following a folder renamed on Proton', async () => {
+        const order: string[] = [];
+        const logger = {
+            ...silentLogger,
+            info: (message: string) => {
+                if (message.startsWith('Moved ')) {
+                    order.push('moved');
+                }
+            },
+        };
+        const ctx = await setup({ fake: slowFake(20), logger });
+        const x = ctx.fake.add({ parentUid: ctx.fake.rootUid, name: 'x', type: NodeType.Folder });
+        const docs = ctx.fake.add({ parentUid: x.uid, name: 'docs', type: NodeType.Folder });
+        ctx.fake.add({ parentUid: docs.uid, name: 'f.txt', type: NodeType.File, content: 'f' });
+        await ctx.engine.start();
+        await ctx.settle();
+
+        const transfers = countTransfers(ctx.drive);
+        const downloadNode = ctx.drive.downloadNode;
+        ctx.drive.downloadNode = async (...args) => {
+            order.push('started');
+            await downloadNode.apply(ctx.drive, args);
+            order.push('ended');
+        };
+        // Files of the root (sorted before "x") download while the walk reaches x/docs.
+        for (const name of names('a', MAX_PARALLEL_TRANSFERS)) {
+            const file = ctx.fake.add({ parentUid: ctx.fake.rootUid, name, type: NodeType.File, content: new Uint8Array(200 * 1024) });
+            ctx.fake.remoteChange({ type: DriveEventType.NodeCreated, uid: file.uid });
+        }
+        await ctx.fake.sdk.renameNode(docs.uid, 'papers');
+        ctx.engine.syncNow();
+        await ctx.settle();
+
+        expect(transfers.peak.download).toBe(MAX_PARALLEL_TRANSFERS);
+        expect(order).toEqual([...Array(MAX_PARALLEL_TRANSFERS).fill('started'), ...Array(MAX_PARALLEL_TRANSFERS).fill('ended'), 'moved']);
+        expect(await readFile(ctx.local('x/papers/f.txt'), 'utf8')).toBe('f');
+        expect(await readdir(ctx.local('x'))).toEqual(['papers']);
+        expect(ctx.state.get('/x/papers/f.txt')).toBeDefined();
+        expect(ctx.state.get('/x/docs')).toBeUndefined();
+        for (const name of names('a', MAX_PARALLEL_TRANSFERS)) {
+            expect(ctx.state.get(`/${name}`)).toBeDefined();
+        }
+        expect(ctx.engine.getStatus().state).toBe('idle');
+    });
+
+    it('reserves storage: refuses an upload that would not fit before it reaches Proton, and resumes when space is freed', async () => {
+        const fake = new FakeDrive({
+            chunkDelayMs: 10,
+            maxStorage: 100,
+            onEvent: (event) => {
+                for (const listener of events) listener(event);
+            },
+        });
+        let uploaders = 0;
+        const getFileUploader = fake.sdk.getFileUploader;
+        fake.sdk.getFileUploader = (...args) => {
+            uploaders++;
+            return getFileUploader(...args);
+        };
+        let engine: SyncEngine | undefined;
+        let drive: DriveService | undefined;
+        const storage = new StorageMonitor({
+            fetch: async () => ({ used: fake.usedStorage(), max: fake.maxStorage ?? 0 }),
+            logger: silentLogger,
+            onChange: () => {},
+            onSpaceFreed: () => engine?.retryNow(),
+            reserved: () => drive?.reservedBytes() ?? 0,
+            debounceMs: 0,
+            minGapMs: 0,
+        });
+        const activity: string[] = [];
+        const ctx = await setup({
+            fake,
+            driveHooks: { onQuotaExceeded: (available) => storage.quotaExceeded(available), storage },
+            onActivity: (item) => activity.push(`${item.kind} ${item.path} ${item.detail}`.trim()),
+        });
+        engine = ctx.engine;
+        drive = ctx.drive;
+        try {
+            storage.start();
+            await storage.settled();
+            await mkdir(ctx.root, { recursive: true });
+            const files = ['a.txt', 'b.txt', 'c.txt', 'd.txt'];
+            for (const name of files) {
+                await edit(ctx.local(name), 'x'.repeat(30));
+            }
+            await ctx.engine.start();
+            await untilError(ctx.engine);
+
+            expect(ctx.engine.getStatus()).toMatchObject({ state: 'error', reason: 'storageFull' });
+            expect(uploaders).toBe(3);
+            const uploaded = [...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort();
+            expect(uploaded).toHaveLength(3);
+            const refused = files.find((name) => !uploaded.includes(name))!;
+            expect(activity.filter((line) => line.startsWith('error'))).toEqual([`error /${refused}`]);
+            expect(await ctx.engine.itemState(`/${refused}`)).toBe('error');
+
+            // Space freed elsewhere: the next reading resumes sync.
+            fake.maxStorage = 1000;
+            storage.changed();
+            await storage.settled();
+            await Bun.sleep(5);
+            await storage.settled();
+            await ctx.settle();
+            expect(ctx.engine.getStatus()).toMatchObject({ state: 'idle', reason: '' });
+            expect([...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort()).toEqual(files);
+            expect(activity.filter((line) => line.startsWith('error'))).toHaveLength(1);
+            // Once a reading counts them, ended uploads hold nothing.
+            storage.changed();
+            await Bun.sleep(5);
+            await storage.settled();
+            expect(ctx.drive.reservedBytes()).toBe(0);
+        } finally {
+            storage.dispose();
+        }
     });
 });

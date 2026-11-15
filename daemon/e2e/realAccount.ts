@@ -160,6 +160,32 @@ async function trashed(name: string): Promise<boolean> {
     return (await readdir(trashFiles).catch(() => [] as string[])).some((entry) => entry === name || entry.startsWith(`${name}.`));
 }
 
+/**
+ * Polls the sync states of local `files` until all are synced, and returns the most
+ * seen syncing at once: the transfers running together.
+ */
+async function peakTransfers(files: string[], timeoutMs: number): Promise<number> {
+    let peak = 0;
+    await waitFor(
+        `${files.length} files synced`,
+        async () => {
+            const states = unwrap(await call('GetItemStates', files));
+            peak = Math.max(peak, files.filter((file) => states[file] === 'syncing').length);
+            return files.every((file) => states[file] === 'synced');
+        },
+        timeoutMs,
+        100,
+    );
+    return peak;
+}
+
+/** Checks the transfers seen at once by peakTransfers: they overlapped, within kationd's limit of 4. */
+function checkParallel(peak: number, what: string): string {
+    assert(peak >= 2, `the ${what} never overlapped (at most ${peak} at once)`);
+    assert(peak <= 4, `${peak} ${what} ran at once, more than 4`);
+    return `up to ${peak} ${what} at once`;
+}
+
 function sha256(content: Buffer | string): string {
     return createHash('sha256').update(content).digest('hex');
 }
@@ -621,6 +647,54 @@ async function main(): Promise<number> {
         assert(String(before.storageUrl).startsWith('https://account.proton.me/'), `unexpected storage page: ${before.storageUrl}`);
         await writeFile(local('storage.bin'), randomBytes(1024 * 1024));
         await waitFor('the storage used to grow', async () => Number((await status()).storageUsed) > usedBefore, REMOTE_TIMEOUT_MS);
+    });
+
+    await step('E2E-26', 'Many small local files are uploaded several at once, at most 4', async () => {
+        await waitIdle();
+        const names = Array.from({ length: 20 }, (_, i) => `f${String(i).padStart(2, '0')}.txt`);
+        const offset = await logSize();
+        await mkdir(local('Parallel-up'), { recursive: true });
+        for (const name of names) {
+            await writeFile(local(`Parallel-up/${name}`), `parallel upload ${name}`);
+        }
+        const peak = await peakTransfers(
+            names.map((name) => local(`Parallel-up/${name}`)),
+            LOCAL_TIMEOUT_MS,
+        );
+        assert(JSON.stringify(await remoteNames(remote('Parallel-up'))) === JSON.stringify(names), 'not every file reached Proton');
+        const logged = await logSince(offset);
+        const missing = names.filter((name) => !logged.includes(`Uploading ${remote(`Parallel-up/${name}`)}`));
+        assert(missing.length === 0, `no upload logged for ${missing.join(', ')}`);
+        return checkParallel(peak, 'uploads');
+    });
+
+    await step('E2E-27', 'Many small files created on Proton are downloaded several at once, at most 4', async () => {
+        await mkdir(local('Parallel-down'), { recursive: true });
+        await waitFor('Parallel-down on Proton', () => remoteExists(remote('Parallel-down')), LOCAL_TIMEOUT_MS);
+        await waitIdle();
+        const names = Array.from({ length: 20 }, (_, i) => `g${String(i).padStart(2, '0')}.txt`);
+        const offset = await logSize();
+        // Paused, so that the files are downloaded in one pass rather than as their notifications trickle in.
+        await call('SetSyncPaused', true);
+        try {
+            for (const name of names) {
+                await remoteUpload(remote(`Parallel-down/${name}`), `parallel download ${name}`);
+            }
+            await waitFor("Proton's change notifications", async () => Number((await syncStatus()).pending) > 0, REMOTE_TIMEOUT_MS);
+        } finally {
+            await call('SetSyncPaused', false);
+        }
+        const peak = await peakTransfers(
+            names.map((name) => local(`Parallel-down/${name}`)),
+            REMOTE_TIMEOUT_MS,
+        );
+        for (const name of names) {
+            assert((await localContent(local(`Parallel-down/${name}`))) === `parallel download ${name}`, `${name} has the wrong content`);
+        }
+        const logged = await logSince(offset);
+        const missing = names.filter((name) => !logged.includes(`Downloading ${remote(`Parallel-down/${name}`)}`));
+        assert(missing.length === 0, `no download logged for ${missing.join(', ')}`);
+        return checkParallel(peak, 'downloads');
     });
 
     await step('E2E-17', 'Starts with the session (systemd user unit enabled and active)', async () => {

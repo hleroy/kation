@@ -24,7 +24,7 @@ afterEach(() => {
     }
 });
 
-function createMonitor(read: () => Storage | Promise<Storage>, options: { minGapMs?: number } = {}) {
+function createMonitor(read: () => Storage | Promise<Storage>, options: { minGapMs?: number; reserved?: () => number } = {}) {
     let fetches = 0;
     const changes: (Storage | undefined)[] = [];
     let freed = 0;
@@ -39,6 +39,7 @@ function createMonitor(read: () => Storage | Promise<Storage>, options: { minGap
         intervalMs: 60_000,
         debounceMs: 0,
         minGapMs: options.minGapMs ?? 0,
+        reserved: options.reserved,
     });
     monitors.push(monitor);
     const settle = async () => {
@@ -141,6 +142,34 @@ describe('StorageMonitor', () => {
         expect(ctx.freed()).toBe(1);
     });
 
+    it('says when space was freed after an upload was refused before it started', async () => {
+        let storage = { used: 40, max: 100 };
+        let reserved = 50;
+        const ctx = createMonitor(() => storage, { reserved: () => reserved });
+        ctx.monitor.start();
+        await ctx.settle();
+        expect(ctx.monitor.latest()).toEqual({ free: 60, reading: 1 });
+        expect(ctx.monitor.nextReading()).toBe(2);
+
+        // 60 free, 50 of them held by uploads in progress: a 20-byte file was refused with 10 left.
+        ctx.monitor.quotaExceeded(10);
+        await ctx.settle();
+        expect(ctx.fetches()).toBe(2);
+        expect(ctx.freed()).toBe(0);
+        // The uploads ended and Proton counts them: nothing more is free.
+        storage = { used: 90, max: 100 };
+        reserved = 0;
+        ctx.monitor.changed();
+        await ctx.settle();
+        expect(ctx.freed()).toBe(0);
+
+        // A file is deleted.
+        storage = { used: 60, max: 100 };
+        ctx.monitor.changed();
+        await ctx.settle();
+        expect(ctx.freed()).toBe(1);
+    });
+
     it('reads again for a new session while a request of the previous session is still in flight', async () => {
         const first = Promise.withResolvers<Storage>();
         let calls = 0;
@@ -202,6 +231,101 @@ describe('quota errors', () => {
         await drive.upload(file, '/big.txt', false);
         expect(refused).toBe(1);
         expect(fake.usedStorage()).toBe(7);
+    });
+});
+
+describe('storage reservation', () => {
+    /** A DriveService with storage readings it is told about, and the uploads that reach the fake drive. */
+    async function reservationSetup(options: { free: number | undefined; chunkDelayMs?: number }) {
+        const fake = new FakeDrive({ chunkDelayMs: options.chunkDelayMs });
+        let uploaders = 0;
+        const getFileUploader = fake.sdk.getFileUploader;
+        fake.sdk.getFileUploader = (...args) => {
+            uploaders++;
+            return getFileUploader(...args);
+        };
+        const readings = { free: options.free, reading: 1, started: 1, changed: 0 };
+        const refusals: (number | undefined)[] = [];
+        const drive = new DriveService(fake.sdk, new DriveTree(fake.sdk, silentLogger), silentLogger, {
+            onQuotaExceeded: (available) => refusals.push(available),
+            storage: {
+                latest: () => ({ free: readings.free, reading: readings.reading }),
+                nextReading: () => readings.started + 1,
+                changed: () => readings.changed++,
+            },
+        });
+        const dir = await tempDir();
+        const file = async (name: string, size: number) => {
+            const localPath = path.join(dir, name);
+            await writeFile(localPath, 'x'.repeat(size));
+            return localPath;
+        };
+        /** A reading that starts now and is applied at once. */
+        const read = (free: number) => {
+            readings.started++;
+            readings.reading = readings.started;
+            readings.free = free;
+        };
+        return { fake, drive, file, readings, read, refusals, uploaders: () => uploaders };
+    }
+
+    it('refuses an upload from Dolphin that does not fit, without contacting Proton', async () => {
+        const ctx = await reservationSetup({ free: 10 });
+        await expect(ctx.drive.upload(await ctx.file('big.txt', 11), '/big.txt', false)).rejects.toMatchObject({
+            code: 'QuotaExceeded',
+        });
+        expect(ctx.uploaders()).toBe(0);
+        expect(ctx.refusals).toEqual([10]);
+        expect(ctx.drive.reservedBytes()).toBe(0);
+        await ctx.drive.upload(await ctx.file('small.txt', 10), '/small.txt', false);
+        expect(ctx.uploaders()).toBe(1);
+    });
+
+    it('counts uploads in progress, and those that ended until a reading started after them is applied', async () => {
+        const ctx = await reservationSetup({ free: 100, chunkDelayMs: 30 });
+        const first = ctx.drive.upload(await ctx.file('a.txt', 40), '/a.txt', false);
+        const second = ctx.drive.upload(await ctx.file('b.txt', 40), '/b.txt', false);
+        await Bun.sleep(5);
+        expect(ctx.drive.reservedBytes()).toBe(80);
+        await expect(ctx.drive.upload(await ctx.file('c.txt', 30), '/c.txt', false)).rejects.toMatchObject({ code: 'QuotaExceeded' });
+        expect(ctx.refusals).toEqual([20]);
+        await Promise.all([first, second]);
+        expect(ctx.readings.changed).toBe(2);
+        // Ended, but the latest reading started before: still held.
+        expect(ctx.drive.reservedBytes()).toBe(80);
+        ctx.read(20);
+        expect(ctx.drive.reservedBytes()).toBe(0);
+        await ctx.drive.upload(await ctx.file('d.txt', 20), '/d.txt', false);
+    });
+
+    it('also holds the whole size for a new version of a file', async () => {
+        const ctx = await reservationSetup({ free: 100 });
+        await ctx.drive.upload(await ctx.file('a.txt', 60), '/a.txt', false);
+        ctx.read(40);
+        await expect(ctx.drive.upload(await ctx.file('a2.txt', 50), '/a.txt', true)).rejects.toMatchObject({ code: 'QuotaExceeded' });
+        expect(ctx.uploaders()).toBe(1);
+    });
+
+    it('releases what a failed or cancelled upload held', async () => {
+        const ctx = await reservationSetup({ free: 100, chunkDelayMs: 20 });
+        const controller = new AbortController();
+        const aborted = ctx.drive.upload(await ctx.file('a.txt', 60), '/a.txt', false, { signal: controller.signal });
+        await Bun.sleep(5);
+        expect(ctx.drive.reservedBytes()).toBe(60);
+        controller.abort();
+        await expect(aborted).rejects.toMatchObject({ code: 'Cancelled' });
+        expect(ctx.drive.reservedBytes()).toBe(0);
+
+        ctx.fake.maxStorage = 10;
+        await expect(ctx.drive.upload(await ctx.file('b.txt', 60), '/b.txt', false)).rejects.toMatchObject({ code: 200001 });
+        expect(ctx.drive.reservedBytes()).toBe(0);
+        expect(ctx.readings.changed).toBe(0);
+    });
+
+    it('does not check while the storage is unknown or unlimited', async () => {
+        const ctx = await reservationSetup({ free: undefined });
+        await ctx.drive.upload(await ctx.file('a.txt', 1000), '/a.txt', false);
+        expect(ctx.refusals).toEqual([]);
     });
 });
 

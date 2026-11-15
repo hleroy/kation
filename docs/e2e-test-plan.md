@@ -97,6 +97,8 @@ Exit code 0 means everything passed.
 | E2E-23 | A file renamed and moved locally is renamed and moved on Proton: its public link still works and nothing is uploaded again |
 | E2E-24 | A file renamed on Proton is renamed locally, not downloaded again |
 | E2E-25 | The status reports the account's Drive storage and its storage page; the storage used grows after a 1 MiB upload |
+| E2E-26 | 20 small files created locally are all uploaded, several at once and never more than 4 (their sync states, polled every 100 ms), and each upload is logged |
+| E2E-27 | 20 small files created on Proton while sync is paused are all downloaded after resuming, several at once and never more than 4, and each download is logged |
 
 Notes for reading results:
 
@@ -105,6 +107,9 @@ Notes for reading results:
   many went before the pause.
 - E2E-14 is skipped (not failed) when the download finishes before it can be
   paused: run it again with a larger `--big-mb`.
+- E2E-26 and E2E-27 fail if the transfers never overlap. On a very fast
+  connection the 100 ms polling may miss the overlap of small files: run
+  them again before reporting it.
 - Remote-to-local tests depend on Proton's change notifications, which
   arrive every 30 seconds or so. Timeouts are generous; a timeout is still a
   failure worth reporting.
