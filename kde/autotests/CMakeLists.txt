@@ -51,7 +51,13 @@ add_dependencies(settingswidgettest kationd-build kcm_kation)
 add_test(NAME settings-widget COMMAND "${DBUS_RUN_SESSION}" -- "$<TARGET_FILE:settingswidgettest>")
 set_tests_properties(settings-widget PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;${_english}" TIMEOUT 120)
 
-add_executable(traytest traytest.cpp ../app/tray.cpp)
+add_executable(selfupdatetest selfupdatetest.cpp ../app/selfupdate.cpp)
+target_include_directories(selfupdatetest PRIVATE ../app)
+target_link_libraries(selfupdatetest PRIVATE Qt6::Test Qt6::Widgets)
+add_test(NAME self-update COMMAND selfupdatetest)
+set_tests_properties(self-update PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(traytest traytest.cpp ../app/tray.cpp ../app/selfupdate.cpp)
 target_include_directories(traytest PRIVATE ../app)
 target_link_libraries(traytest PRIVATE kation_dbus Qt6::Test Qt6::Widgets
     KF6::I18n KF6::KIOGui KF6::KIOWidgets KF6::Notifications KF6::StatusNotifierItem)

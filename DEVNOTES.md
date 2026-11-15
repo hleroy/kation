@@ -86,7 +86,11 @@ cmake --build build
 ctest --test-dir build --output-on-failure    # about 2.5 minutes
 sudo cmake --install build
 systemctl --user daemon-reload
+systemctl --user try-restart kationd.service    # the new kationd, if one runs
 ```
+
+Unlike the packages, `cmake --install` runs no script: reload and restart by
+hand as above, and quit and start the tray app again (`kation`).
 
 To uninstall: `sudo xargs -d '\n' rm -f < build/install_manifest.txt`.
 

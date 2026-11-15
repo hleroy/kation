@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Installing or upgrading a package restarts Kation's background service and tray app in the sessions where they run, so the new version takes effect without logging out (and a first install no longer needs `systemctl --user daemon-reload`); removing the package stops the service.
 - A folder deleted locally while it is being uploaded is noticed as soon as sync reaches its next item, and moved to the Proton Drive trash as a whole; sync no longer keeps creating its subfolders on Proton or trashes its items one by one.
 - Sync does not delete anything from Proton Drive while a folder of the sync folder cannot be read: a file missing elsewhere may have been moved into it.
 - A file or folder deleted locally after it was renamed or moved on Proton Drive is no longer moved to the Proton trash: the rename or move wins, and the item comes back at its new place.

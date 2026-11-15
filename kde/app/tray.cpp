@@ -6,6 +6,7 @@
 #include "kationtexts.h"
 #include "kationtypes.h"
 #include "kationweb.h"
+#include "selfupdate.h"
 
 #include <KConfig>
 #include <KConfigGroup>
@@ -138,7 +139,13 @@ KationTray::KationTray(QObject *parent)
     connect(m_drive, &KationDriveInterface::SyncActivity, this, &KationTray::addActivity);
     // kationd restarted (for example after an update): read everything again.
     auto watcher = new QDBusServiceWatcher(Kation::serviceName, QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForOwnerChange, this);
-    connect(watcher, &QDBusServiceWatcher::serviceRegistered, this, &KationTray::refresh);
+    connect(watcher, &QDBusServiceWatcher::serviceRegistered, this, [this] {
+        // A package upgrade restarts kationd once the new files are in place.
+        if (Kation::executableReplaced()) {
+            Q_EMIT updateInstalled();
+        }
+        refresh();
+    });
     connect(watcher, &QDBusServiceWatcher::serviceUnregistered, this, [this] {
         m_reachable = false;
         update();
