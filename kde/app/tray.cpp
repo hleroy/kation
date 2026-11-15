@@ -247,8 +247,7 @@ void KationTray::showSyncStatus(const QVariantMap &status)
 void KationTray::checkStorage()
 {
     const QString email = m_status.value(QStringLiteral("email")).toString();
-    // Without the sync status, a refusal by Proton is not known yet: the level would look lower and re-arm.
-    if (!m_status.value(QStringLiteral("loggedIn")).toBool() || email.isEmpty() || m_syncStatus.isEmpty()) {
+    if (!m_status.value(QStringLiteral("loggedIn")).toBool() || email.isEmpty()) {
         return;
     }
     const Kation::StorageLevel level = Kation::storageLevel(m_status, m_uploadsRefused);
@@ -262,8 +261,13 @@ void KationTray::checkStorage()
         notified = Kation::StorageLevel::Ok;
     }
     const int percent = Kation::storagePercent(m_status);
-    // Usage just under a level would otherwise notify again each time it crosses it.
-    if (notified == Kation::StorageLevel::Full && level != Kation::StorageLevel::Full && percent < FullRearmPercent) {
+    const qint64 max = m_status.value(QStringLiteral("storageMax")).toLongLong();
+    const qint64 available = percent < 0 ? 0 : max - m_status.value(QStringLiteral("storageUsed")).toLongLong();
+    // "Full" may come from a refused file at any usage, and kationd's sync states do not say when that ends
+    // (a pause, a restart): notify it again only once space was really freed.
+    const qint64 availableWhenFull = group.readEntry("AvailableWhenFull", qint64(0));
+    if (notified == Kation::StorageLevel::Full && level != Kation::StorageLevel::Full && percent >= 0 && percent < FullRearmPercent
+        && available > availableWhenFull + max / 100) {
         notified = Kation::StorageLevel::AlmostFull;
     }
     if (notified == Kation::StorageLevel::AlmostFull && level < Kation::StorageLevel::AlmostFull && percent < AlmostFullRearmPercent) {
@@ -271,6 +275,9 @@ void KationTray::checkStorage()
     }
     if (level > notified) {
         notified = level;
+        if (level == Kation::StorageLevel::Full) {
+            group.writeEntry("AvailableWhenFull", available);
+        }
         const QString title = level == Kation::StorageLevel::Full ? i18n("Proton Drive is full") : i18n("Proton Drive almost full");
         const QString url = m_status.value(QStringLiteral("storageUrl")).toString();
         notify(QStringLiteral("storage"), title, Kation::storageWarningText(level), i18n("Manage Storage"), [url] {
@@ -280,8 +287,8 @@ void KationTray::checkStorage()
     if (group.readEntry("Account", QString()) != email || group.readEntry("NotifiedLevel", -1) != int(notified)) {
         group.writeEntry("Account", email);
         group.writeEntry("NotifiedLevel", int(notified));
-        group.sync();
     }
+    group.sync();
 }
 
 QString KationTray::storageLine() const

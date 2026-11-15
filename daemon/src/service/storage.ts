@@ -117,9 +117,11 @@ export class StorageMonitor {
         this.changed();
     }
 
-    /** For tests: resolves once the request in progress, if any, is done. */
+    /** For tests: resolves once no request is in progress, including a follow-up one. */
     async settled(): Promise<void> {
-        await this.fetching;
+        while (this.fetching) {
+            await this.fetching;
+        }
     }
 
     private refresh(): Promise<void> {
