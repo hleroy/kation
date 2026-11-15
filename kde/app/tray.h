@@ -39,6 +39,8 @@ Q_SIGNALS:
     void settingsRequested();
     /// Emitted with each notification sent (event ID from kation.notifyrc, and its text).
     void notified(const QString &eventId, const QString &text);
+    /// A package upgrade replaced this program (and restarted kationd): the new version should run.
+    void updateInstalled();
 
 private:
     void refresh();

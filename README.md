@@ -53,8 +53,13 @@ gh attestation verify <package file> --repo hleroy/kation \
 sudo apt install ./kation_*_amd64.deb            # Debian 13
 sudo dnf install ./kation-*.fc43.x86_64.rpm      # Fedora 43
 sudo pacman -U kation-*-x86_64.pkg.tar.zst       # Arch Linux
-systemctl --user daemon-reload
 ```
+
+Installing or upgrading the package restarts Kation's background service in
+the sessions where it runs, and the tray icon follows (from 0.4.0 on: when
+upgrading from an older version, quit Kation from its tray menu and start it
+again), so an upgrade takes effect without logging out. Restart Dolphin afterwards (`kquitapp6 dolphin`) so it loads the
+new emblems and context menu.
 
 Each package is built for that distribution release. On another
 distribution or release (Ubuntu, KDE neon, …), build Kation from source: see
@@ -77,8 +82,8 @@ provide (see [ROADMAP.md](ROADMAP.md#out-of-scope)).
 4. To sync a folder, click **Turn On Sync** in the Kation window. The first
    sync downloads all of "My files", so check your free disk space, or
    untick big folders in **Folders to Sync** first.
-5. Restart Dolphin once after installing, so it loads the emblems and the
-   **Proton Drive** context menu.
+5. Restart Dolphin once after installing or upgrading, so it loads the
+   emblems and the **Proton Drive** context menu.
 
 `kationd` also has commands for scripts and troubleshooting. They go through
 the running service, so they never compete with it for the Proton session:

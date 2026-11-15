@@ -26,6 +26,8 @@ optdepends=(
     'systemsettings: Kation settings in System Settings'
     'kwallet: keyring for the Proton session (or gnome-keyring)'
 )
+# Restarts kationd in the running sessions after an upgrade, stops it on removal.
+install=kation.install
 # `bun build --compile` appends the JavaScript to the kationd executable, and
 # stripping it removes the program.
 options=(!strip !debug)

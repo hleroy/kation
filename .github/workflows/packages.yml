@@ -61,6 +61,14 @@ jobs:
             dpkg -L kation | grep -q "/$plugin.so$" || { echo "missing $plugin.so"; exit 1; }
           done
           kationd version
+      # The scripts restart kationd in running sessions; without systemd they must do nothing and succeed.
+      - name: Check the package scripts
+        run: |
+          dpkg-deb -I dist/kation_*.deb postinst | grep -q 'kation_user_sessions upgrade'
+          dpkg-deb -I dist/kation_*.deb prerm | grep -q 'kation_user_sessions remove'
+          apt-get install -y -q --reinstall ./dist/kation_*.deb
+          apt-get remove -y -q kation
+          apt-get install -y -q ./dist/kation_*.deb
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kation-debian13-deb
@@ -111,6 +119,13 @@ jobs:
             rpm -ql kation | grep -q "/$plugin.so$" || { echo "missing $plugin.so"; exit 1; }
           done
           kationd version
+      - name: Check the package scripts
+        run: |
+          rpm -q --scripts kation | grep -q 'kation_user_sessions upgrade'
+          rpm -q --scripts kation | grep -q 'kation_user_sessions remove'
+          dnf -y -q reinstall ./dist/kation-*.rpm
+          dnf -y -q remove kation
+          dnf -y -q install ./dist/kation-*.rpm
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kation-fedora43-rpm
@@ -161,6 +176,13 @@ jobs:
             pacman -Qlq kation | grep -q "/$plugin.so$" || { echo "missing $plugin.so"; exit 1; }
           done
           kationd version
+      - name: Check the package scripts
+        run: |
+          bsdtar -xOf dist/kation-*.pkg.tar.zst .INSTALL | grep -q 'kation_user_sessions upgrade'
+          bsdtar -xOf dist/kation-*.pkg.tar.zst .INSTALL | grep -q 'kation_user_sessions remove'
+          pacman -U --noconfirm dist/kation-*.pkg.tar.zst
+          pacman -R --noconfirm kation
+          pacman -U --noconfirm dist/kation-*.pkg.tar.zst
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kation-arch-pkg

@@ -171,8 +171,8 @@ Install it (replacing a 'sudo cmake --install' install: remove that first with
   xargs -d '\\n' sudo rm -f < build/install_manifest.txt):
     $INSTALL_COMMAND
 
+The package restarts Kation's background service and tray where they run.
 Then, in your session:
-    systemctl --user daemon-reload
     kquitapp6 dolphin     # Dolphin loads the emblems and context menu on start
-    kation &
+    kation &              # the first time, or if the tray is not running
 EOF

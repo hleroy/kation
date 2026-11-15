@@ -19,6 +19,28 @@ install(FILES
     DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/kation"
 )
 
+# Package scripts: each is packaging/user-sessions.sh followed by a short body,
+# so that upgrades restart kationd in the running sessions and removals stop it.
+# They are package metadata, not installed files.
+set(KATION_PACKAGE_SCRIPTS_DIR "${PROJECT_BINARY_DIR}/packaging")
+file(READ "${PROJECT_SOURCE_DIR}/packaging/user-sessions.sh" _kation_user_sessions)
+function(kation_package_script body output)
+    file(READ "${PROJECT_SOURCE_DIR}/packaging/${body}" _body)
+    file(WRITE "${KATION_PACKAGE_SCRIPTS_DIR}/${output}"
+        "#!/bin/sh\n# Generated from packaging/user-sessions.sh and packaging/${body} by cmake/KationPackaging.cmake.\n\n"
+        "${_kation_user_sessions}\n${_body}")
+    file(CHMOD "${KATION_PACKAGE_SCRIPTS_DIR}/${output}"
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    set_property(DIRECTORY "${PROJECT_SOURCE_DIR}" APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${PROJECT_SOURCE_DIR}/packaging/user-sessions.sh" "${PROJECT_SOURCE_DIR}/packaging/${body}")
+endfunction()
+kation_package_script(deb/postinst.sh deb/postinst)
+kation_package_script(deb/prerm.sh deb/prerm)
+kation_package_script(rpm/posttrans.sh rpm/posttrans)
+kation_package_script(rpm/preun.sh rpm/preun)
+# makepkg reads the install script next to the PKGBUILD.
+kation_package_script(arch/kation.install.sh ../arch/kation.install)
+
 set(CPACK_GENERATOR DEB RPM)
 set(CPACK_PACKAGE_NAME kation)
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
@@ -46,6 +68,7 @@ set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "dolphin, systemsettings, kwallet6 | gnome-k
 # executable, and stripping it removes the program.
 set(CPACK_STRIP_FILES OFF)
 set(CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION ON)
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${KATION_PACKAGE_SCRIPTS_DIR}/deb/postinst;${KATION_PACKAGE_SCRIPTS_DIR}/deb/prerm")
 
 # RPM (Fedora). Library dependencies come from rpmbuild's automatic Requires;
 # libsecret is loaded at run time, as above. rpmbuild strips binaries and splits
@@ -58,6 +81,8 @@ set(CPACK_RPM_PACKAGE_URL "https://github.com/hleroy/kation")
 set(CPACK_RPM_PACKAGE_DESCRIPTION "${CPACK_PACKAGE_DESCRIPTION}")
 set(CPACK_RPM_PACKAGE_REQUIRES "libsecret")
 set(CPACK_RPM_PACKAGE_SUGGESTS "dolphin, plasma-systemsettings, kf6-kwallet")
+set(CPACK_RPM_POST_TRANS_SCRIPT_FILE "${KATION_PACKAGE_SCRIPTS_DIR}/rpm/posttrans")
+set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${KATION_PACKAGE_SCRIPTS_DIR}/rpm/preun")
 set(CPACK_RPM_SPEC_MORE_DEFINE "%global __strip /bin/true
 %global debug_package %{nil}")
 
