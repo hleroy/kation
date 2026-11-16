@@ -56,11 +56,15 @@ export async function serve(options: ServeOptions): Promise<void> {
         logger,
         onChange: () => session.notifyStatus(),
         onSpaceFreed: () => sync.retryNow(),
+        reserved: (): number => drive.reservedBytes(),
         // The fake drive's changes show at once, for the KDE tests.
         ...(options.fakeDrive ? { debounceMs: 0, minGapMs: 0 } : {}),
     });
     const tree = new DriveTree(backend.sdk, logger);
-    const drive = new DriveService(backend.sdk, tree, logger, { onQuotaExceeded: () => storage.quotaExceeded() });
+    const drive: DriveService = new DriveService(backend.sdk, tree, logger, {
+        onQuotaExceeded: (available) => storage.quotaExceeded(available),
+        storage,
+    });
     const bus = dbus.sessionBus();
     let server: DriveDbusServer | undefined;
     let restorer: SessionRestorer | undefined;

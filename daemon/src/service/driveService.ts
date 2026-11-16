@@ -16,6 +16,7 @@ import { type Entry, isFolder, nodeName, toEntry } from './entry';
 import { KationError, toKationError } from './errors';
 import { RateLimiter } from './rateLimiter';
 import type { DriveSdk } from './sdk';
+import type { StorageReadings } from './storage';
 import { type DriveTree, joinPath, splitParent } from './tree';
 
 export type TransferOptions = {
@@ -47,16 +48,26 @@ const NEW_PART_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL
 const APPEND_PART_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 const READ_PART_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
+export type DriveServiceHooks = {
+    /** An upload was refused for lack of space: by Proton, or here before it started (with the bytes counted as free). */
+    onQuotaExceeded?: (available?: number) => void;
+    /** The storage readings: uploads that would not fit are refused before they start. */
+    storage?: StorageReadings;
+};
+
 export class DriveService {
     /** Speed limits shared by all transfers (sync and online view), set from the settings. */
     readonly uploadLimiter = new RateLimiter();
     readonly downloadLimiter = new RateLimiter();
+    private uploadingBytes = 0;
+    /** Bytes of ended uploads that the latest reading may not count, by the number of the first reading that does. */
+    private uploadedBytes: { countedFrom: number; bytes: number }[] = [];
 
     constructor(
         private readonly sdk: DriveSdk,
         readonly tree: DriveTree,
         private readonly logger: Logger,
-        private readonly hooks: { onQuotaExceeded?: () => void } = {},
+        private readonly hooks: DriveServiceHooks = {},
     ) {}
 
     async stat(drivePath: string): Promise<Entry> {
@@ -323,15 +334,17 @@ export class DriveService {
         if (!info.isFile()) {
             throw new KationError('InvalidArgument', `Not a regular file: ${localPath}`);
         }
-        const metadata = {
-            // The destination name decides the type: local paths can be
-            // nameless spool files (e.g. data streamed in by KIO).
-            mediaType: mediaTypeOf(name),
-            expectedSize: info.size,
-            expectedSha1: await sha1Of(localPath, options.signal),
-            modificationTime: info.mtimeMs > 0 ? info.mtime : undefined,
-        };
+        const release = this.reserveSpace(info.size);
+        let uploaded = false;
         try {
+            const metadata = {
+                // The destination name decides the type: local paths can be
+                // nameless spool files (e.g. data streamed in by KIO).
+                mediaType: mediaTypeOf(name),
+                expectedSize: info.size,
+                expectedSha1: await sha1Of(localPath, options.signal),
+                modificationTime: info.mtimeMs > 0 ? info.mtime : undefined,
+            };
             const uploader = existing
                 ? await this.sdk.getFileRevisionUploader(existing, metadata, options.signal)
                 : await this.sdk.getFileUploader(parent, name, metadata, options.signal);
@@ -342,6 +355,7 @@ export class DriveService {
             );
             // The signal given to the uploader aborts the transfer itself.
             const { nodeUid } = await raceAbort(controller.completion(), options.signal);
+            uploaded = true;
             return await this.sdk.getNode(nodeUid);
         } catch (error: unknown) {
             if (toKationError(error).code === 'QuotaExceeded') {
@@ -349,8 +363,44 @@ export class DriveService {
             }
             throw error;
         } finally {
+            release(uploaded);
             this.tree.invalidate(parent.uid);
         }
+    }
+
+    /** Bytes held by uploads that the latest storage reading does not count: in progress, or ended since it started. */
+    reservedBytes(): number {
+        const reading = this.hooks.storage?.latest().reading ?? 0;
+        this.uploadedBytes = this.uploadedBytes.filter((entry) => entry.countedFrom > reading);
+        return this.uploadedBytes.reduce((sum, entry) => sum + entry.bytes, this.uploadingBytes);
+    }
+
+    /** Holds the whole `size` (also for a new revision), as Proton's Windows app does; returns the function that releases it. */
+    private reserveSpace(size: number): (uploaded: boolean) => void {
+        const storage = this.hooks.storage;
+        const free = storage?.latest().free;
+        if (free !== undefined) {
+            const available = free - this.reservedBytes();
+            if (size > available) {
+                this.hooks.onQuotaExceeded?.(available);
+                throw new KationError('QuotaExceeded', `Not enough space left in Proton Drive: ${size} bytes to upload, ${available} free`);
+            }
+        }
+        this.uploadingBytes += size;
+        return (uploaded) => {
+            this.uploadingBytes -= size;
+            if (uploaded && storage) {
+                // Counted by readings that start from now on.
+                const countedFrom = storage.nextReading();
+                const last = this.uploadedBytes.at(-1);
+                if (last?.countedFrom === countedFrom) {
+                    last.bytes += size;
+                } else {
+                    this.uploadedBytes.push({ countedFrom, bytes: size });
+                }
+                storage.changed();
+            }
+        };
     }
 
     /**

@@ -20,13 +20,25 @@ export function driveStorageOf(user: StorageFields): Storage {
     return { used: user.UsedDriveSpace ?? user.UsedSpace ?? 0, max: user.MaxDriveSpace ?? user.MaxSpace ?? 0 };
 }
 
+/** What DriveService needs to refuse uploads that would not fit (see DriveService.uploadFile). */
+export type StorageReadings = {
+    /** Free bytes by the latest reading (undefined: unknown, or no limit), and that reading's number (0: none yet). */
+    latest(): { free: number | undefined; reading: number };
+    /** The number the next reading will have: it counts the uploads that ended before it starts. */
+    nextReading(): number;
+    /** Something changed in Proton Drive: read the storage again soon. */
+    changed(): void;
+};
+
 export type StorageMonitorOptions = {
     fetch: () => Promise<Storage>;
     logger: Logger;
     /** The storage changed; undefined once unknown (signed out). */
     onChange: (storage: Storage | undefined) => void;
-    /** More space is free than when Proton last refused an upload for quota. */
+    /** More space is free than when an upload was last refused for quota. */
     onSpaceFreed?: () => void;
+    /** Bytes held by uploads that the readings do not count yet (DriveService.reservedBytes). */
+    reserved?: () => number;
     /** Proton's Windows app also reads the user every 5 minutes. */
     intervalMs?: number;
     /** After a change: wait this long, so that a burst of changes makes one request. */
@@ -36,8 +48,9 @@ export type StorageMonitorOptions = {
     now?: () => number;
 };
 
-export class StorageMonitor {
-    private readonly options: Required<Omit<StorageMonitorOptions, 'onSpaceFreed'>> & Pick<StorageMonitorOptions, 'onSpaceFreed'>;
+export class StorageMonitor implements StorageReadings {
+    private readonly options: Required<Omit<StorageMonitorOptions, 'onSpaceFreed' | 'reserved'>> &
+        Pick<StorageMonitorOptions, 'onSpaceFreed' | 'reserved'>;
     private current?: Storage;
     private running = false;
     /** Bumped by start and stop: a request started before must not apply its answer. */
@@ -50,8 +63,12 @@ export class StorageMonitor {
     /** A refresh was asked while a request was in flight: its answer may predate the change. */
     private refreshAgain = false;
     private quotaErrorPending = false;
-    /** Free bytes read after Proton refused an upload for quota. */
+    /** Free bytes, less those reserved, when an upload was refused for quota. */
     private availableAtQuotaError?: number;
+    /** Readings started so far: each reading's number. */
+    private readingsStarted = 0;
+    /** The number of the reading `current` comes from. */
+    private appliedReading = 0;
 
     constructor(options: StorageMonitorOptions) {
         this.options = { intervalMs: 5 * 60 * 1000, debounceMs: 2000, minGapMs: 30 * 1000, now: Date.now, ...options };
@@ -60,6 +77,14 @@ export class StorageMonitor {
     /** Undefined while unknown, or when the account has no limit. */
     get(): Storage | undefined {
         return this.current;
+    }
+
+    latest(): { free: number | undefined; reading: number } {
+        return { free: this.current && this.current.max - this.current.used, reading: this.appliedReading };
+    }
+
+    nextReading(): number {
+        return this.readingsStarted + 1;
     }
 
     /** Reads the storage now, then periodically. Called when signed in. */
@@ -108,12 +133,19 @@ export class StorageMonitor {
         }, delay);
     }
 
-    /** Proton refused an upload for lack of space. */
-    quotaExceeded(): void {
+    /**
+     * An upload was refused for lack of space: by Proton (the next reading tells how much
+     * was free), or by DriveService before it started, with the bytes it counted as free.
+     */
+    quotaExceeded(available?: number): void {
         if (!this.running) {
             return;
         }
-        this.quotaErrorPending = true;
+        if (available === undefined) {
+            this.quotaErrorPending = true;
+        } else {
+            this.availableAtQuotaError = available;
+        }
         this.changed();
     }
 
@@ -135,7 +167,8 @@ export class StorageMonitor {
         const quotaError = this.quotaErrorPending;
         this.quotaErrorPending = false;
         this.fetchingGeneration = generation;
-        const fetching: Promise<void> = this.fetchOnce(generation, quotaError).finally(() => {
+        const reading = ++this.readingsStarted;
+        const fetching: Promise<void> = this.fetchOnce(generation, quotaError, reading).finally(() => {
             if (this.fetching !== fetching) {
                 return;
             }
@@ -149,11 +182,11 @@ export class StorageMonitor {
         return fetching;
     }
 
-    private async fetchOnce(generation: number, quotaError: boolean): Promise<void> {
+    private async fetchOnce(generation: number, quotaError: boolean, reading: number): Promise<void> {
         try {
             const storage = await this.options.fetch();
             if (generation === this.generation) {
-                this.apply(storage, quotaError);
+                this.apply(storage, quotaError, reading);
             }
         } catch (error: unknown) {
             if (generation === this.generation) {
@@ -163,14 +196,16 @@ export class StorageMonitor {
         }
     }
 
-    private apply(storage: Storage, quotaError: boolean): void {
+    private apply(storage: Storage, quotaError: boolean, reading: number): void {
         const known = storage.max > 0 ? storage : undefined;
+        this.appliedReading = reading;
         if (known?.used !== this.current?.used || known?.max !== this.current?.max) {
             this.options.logger.debug(known ? `Storage: ${known.used} of ${known.max} bytes used` : 'Storage: no limit reported');
             this.current = known;
             this.options.onChange(known);
         }
-        const available = known ? known.max - known.used : 0;
+        // Less what uploads hold: a reading made while they run does not count them yet.
+        const available = known ? known.max - known.used - (this.options.reserved?.() ?? 0) : 0;
         if (quotaError) {
             this.availableAtQuotaError = available;
         } else if (this.availableAtQuotaError !== undefined && available > this.availableAtQuotaError) {

@@ -65,8 +65,10 @@ The Kation window, the tray menu and Dolphin's status bar (in the online
 view) show how much of your Proton storage is used. Kation notifies you once
 when it reaches 90%, and again if it gets full.
 
-When Proton refuses an upload for lack of space, sync stops uploading but
-keeps downloading and applying deletions and moves. Files waiting to be
+When an upload does not fit in the space left, sync stops uploading but
+keeps downloading and applying deletions and moves. Kation checks before
+each upload starts, counting the uploads already running, so that files
+uploaded at the same time do not go over your storage. Files waiting to be
 uploaded show an error emblem in Dolphin. Free up space (files in the Proton
 Drive trash count too) or get more storage: uploads resume within a few
 minutes.
@@ -85,6 +87,11 @@ The first sync downloads everything you selected, so check your free disk
 space, or untick big folders first.
 
 ## Running in the background
+
+- Sync transfers up to 4 files at once, uploads and downloads together. A
+  folder counts as synced once all its files are, and a rename or move waits
+  for the transfers running at that moment to end. The speed limits apply to
+  all transfers together.
 
 - While sync is on, Kation's background service starts when you log in and
   stops when you log out. Closing the Kation window or quitting the tray

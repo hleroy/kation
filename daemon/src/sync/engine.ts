@@ -47,6 +47,7 @@ import {
 } from './local';
 import { findUnmountedDisk } from './mounts';
 import { type BaseEntry, childPath, nameOf, parentOf, type SyncState } from './state';
+import { TransferPool } from './transferPool';
 
 export type SyncPhase = 'disabled' | 'idle' | 'syncing' | 'paused' | 'error';
 
@@ -73,7 +74,7 @@ export type SyncStatus = {
     reason: SyncReason;
     /** Deletions allowed in one pass before sync pauses for safety. */
     deletionLimit: number;
-    /** Path being transferred, or "". */
+    /** One of the paths being transferred (the one started last), or "". */
     current: string;
     /** Folders waiting to be synced. */
     pending: number;
@@ -174,6 +175,9 @@ class MoveFailedOnce extends Error {}
 /** A local folder disappeared while the pass was working in it: its parent decides what to do. */
 class LocalFolderGone extends Error {}
 
+/** Starts the file part of an item's reconciliation as a job of the pass's transfer pool. */
+type StartFile = (itemPath: string, work: () => Promise<void>) => Promise<void>;
+
 type Callbacks = 'onStatus' | 'onActivity' | 'onItemsChanged';
 
 /** State key: the kind of safety pause ('folder' or 'account') sync is stuck in, until a pass succeeds. */
@@ -182,6 +186,8 @@ export const SAFETY_PAUSE_META = 'safetyPause';
 const PASS_ABORTING_CODES = new Set(['RateLimited', 'Connection', 'NotLoggedIn', 'Cancelled']);
 const MAX_RETRY_DELAY_MS = 10 * 60 * 1000;
 const MAX_LOGGED_FOLDERS = 10;
+/** Files transferred (or trashed) at once, uploads and downloads together. Proton's Windows app also runs 4. */
+export const MAX_PARALLEL_TRANSFERS = 4;
 
 /** The folders of a pass for its log line: a first sync has thousands of them. */
 export function foldersForLog(folders: string[]): string {
@@ -203,6 +209,12 @@ export class SyncEngine {
     private rootCheckTimer?: ReturnType<typeof setInterval>;
     private watcher?: FSWatcher;
     private abort = new AbortController();
+    /** The current pass's transfers; its signal follows `abort` and also stops when a transfer fails the pass. */
+    private transfers = new TransferPool(MAX_PARALLEL_TRANSFERS);
+    /** The error of a transfer that ended the current pass. */
+    private passFailure?: unknown;
+    /** Paths being transferred, the one started last at the end (status.current). */
+    private transferring = new Set<string>();
     private stopped = false;
     private paused = false;
     private retryDelayMs = 0;
@@ -291,6 +303,7 @@ export class SyncEngine {
         clearInterval(this.rootCheckTimer);
         this.watcher?.close();
         this.abort.abort();
+        this.transferring.clear();
         await this.running?.catch(() => {});
         this.setStatus({ state: 'disabled', message: '', reason: '', current: '' });
         this.resolveIdle();
@@ -306,6 +319,7 @@ export class SyncEngine {
             this.abort.abort();
             clearTimeout(this.timer);
             this.timer = undefined;
+            this.transferring.clear();
             this.setStatus({ state: 'paused', message: 'Paused', reason: 'user', current: '' });
             if (!this.running) {
                 this.resolveIdle();
@@ -446,6 +460,8 @@ export class SyncEngine {
         this.realRoot = undefined;
         this.abort = new AbortController();
         const abort = this.abort;
+        this.transfers = new TransferPool(MAX_PARALLEL_TRANSFERS, abort.signal);
+        this.passFailure = undefined;
         const folders = [...dirty.keys()];
         this.logger.info(
             `Sync pass: ${full ? `full (${full})` : 'changes'}, folders ${foldersForLog(folders)}${this.paused ? ' [paused!]' : ''}`,
@@ -546,13 +562,17 @@ export class SyncEngine {
         if (this.pausedFor) {
             return;
         }
+        // Paused by the user while the pass was ending: its failure must not replace that pause. Resuming checks again.
+        if (this.paused) {
+            return;
+        }
         if (error instanceof SafetyPause) {
             this.pauseFor(error);
             return;
         }
         const kationError = toKationError(error);
         // Stopped by a pause (possibly already resumed): the work was put back above.
-        if (kationError.code === 'Cancelled' && (this.paused || this.stopped || abortedOnPurpose)) {
+        if (kationError.code === 'Cancelled' && (this.stopped || abortedOnPurpose)) {
             return;
         }
         this.logger.error('Sync pass failed', error);
@@ -584,6 +604,7 @@ export class SyncEngine {
         }
         clearTimeout(this.timer);
         this.timer = undefined;
+        this.transferring.clear();
         this.setStatus({ state: 'paused', message: pause.message, reason: pause.kind, current: '' });
     }
 
@@ -801,7 +822,7 @@ export class SyncEngine {
                 throw problem;
             }
         }
-        this.abort.signal.throwIfAborted();
+        this.signal.throwIfAborted();
 
         await this.checkDeletionCount(folder, base, local, remote);
         const movesAtScan = this.movesThisPass;
@@ -809,96 +830,88 @@ export class SyncEngine {
         const skipped = new Set<string>();
         // Only on this side: someone else's item must not keep sync in error (an editor of a shared folder).
         const remoteOnly = (name: string) => remote.has(name) && !local.has(name) && !base.has(name);
-        for (const name of names) {
-            this.abort.signal.throwIfAborted();
-            const itemPath = childPath(folder, name);
-            if (isIgnoredName(name) || this.isExcluded(itemPath)) {
-                continue;
-            }
-            if (remoteOnly(name) && Buffer.byteLength(name) > MAX_NAME_BYTES) {
-                this.skipTooLong(itemPath);
-                skipped.add(itemPath);
-                continue;
-            }
-            try {
-                let localItem = local.get(name);
-                let baseEntry = base.get(name);
-                let remoteItem = remote.get(name);
-                if (this.movesThisPass !== movesAtScan) {
-                    // A move since the scan may have taken this item away or brought one here.
-                    localItem = await statItem(this.absolute(itemPath));
-                    baseEntry = this.options.state.get(itemPath);
-                    if (source === 'base') {
-                        remoteItem = baseEntry && remoteItemFromBase(baseEntry);
-                    } else if (remoteItem && this.movedOnProton.has(remoteItem.uid) && baseEntry?.remoteUid !== remoteItem.uid) {
-                        // Listed before this pass moved it away on Proton.
-                        remoteItem = undefined;
-                    } else if (!remoteItem && baseEntry && this.movedOnProton.has(baseEntry.remoteUid)) {
-                        remoteItem = remoteItemFromBase(baseEntry);
-                    }
+        const failed = (error: unknown, itemPath: string) =>
+            this.itemFailed(error, context, itemPath, remoteOnly(nameOf(itemPath)), skipped, errors);
+
+        // Files run as jobs of the pass's pool. This call waits for its own before it returns:
+        // its callers then see the folder's files done.
+        const jobs: Promise<void>[] = [];
+        let gone: LocalFolderGone | undefined;
+        const startFile: StartFile = async (itemPath, work) => {
+            const { done } = await this.transfers.run(async () => {
+                if (gone) {
+                    // The walk was already waiting for this slot: a download would recreate the folder.
+                    return;
                 }
-                await this.reconcileItem(context, itemPath, localItem, remoteItem, baseEntry, fresh, recursive, errors);
-            } catch (error: unknown) {
-                if (error instanceof SafetyPause) {
-                    throw error;
+                try {
+                    await work();
+                } catch (error: unknown) {
+                    await failed(error, itemPath).catch((fatal: unknown) => {
+                        if (fatal instanceof LocalFolderGone) {
+                            gone ??= fatal;
+                        } else {
+                            this.failPass(fatal);
+                        }
+                    });
                 }
-                const kationError = toKationError(error);
-                if (PASS_ABORTING_CODES.has(kationError.code)) {
-                    throw kationError;
+            });
+            jobs.push(done);
+        };
+
+        let walkError: unknown;
+        try {
+            for (const name of names) {
+                this.signal.throwIfAborted();
+                if (gone) {
+                    break;
                 }
-                // A file system with a lower limit (eCryptfs), or a path too long as a whole.
-                if (remoteOnly(name) && isNameTooLong(error)) {
+                const itemPath = childPath(folder, name);
+                if (isIgnoredName(name) || this.isExcluded(itemPath)) {
+                    continue;
+                }
+                if (remoteOnly(name) && Buffer.byteLength(name) > MAX_NAME_BYTES) {
                     this.skipTooLong(itemPath);
                     skipped.add(itemPath);
                     continue;
                 }
-                const goneLocally = isGoneLocally(error);
-                if (goneLocally && !context.localMayBeMissing) {
-                    // The whole folder may have gone, not just this item: then stop working in it.
-                    await this.checkLocalFolder(folder);
-                }
-                if (goneLocally && !this.notFoundRetried.has(itemPath)) {
-                    this.notFoundRetried.add(itemPath);
-                    this.logger.info(`${itemPath} was removed here during sync; checking again`);
-                    // Listed again from the server: a remote change this pass saw must not be forgotten.
-                    this.markDirty(folder, true);
-                    continue;
-                }
-                if (kationError.code === 'NotFound' && !goneLocally && !this.notFoundRetried.has(itemPath)) {
-                    // Usually a race: the item or its folder changed on Proton during this pass
-                    // (for example trashed), and the event has not been applied yet. List the
-                    // folder again from the server once before calling it an error.
-                    this.notFoundRetried.add(itemPath);
-                    this.logger.warn(`${itemPath} changed on Proton during sync (${kationError.message}); checking again`);
-                    this.markDirty(folder, true);
-                    continue;
-                }
-                const linked = error instanceof LinkInTheWay;
-                const full = kationError.code === 'QuotaExceeded';
-                if (linked) {
-                    this.logger.warn(`Not syncing ${itemPath}: ${kationError.message}`);
-                    this.linkInTheWay = true;
-                } else if (full) {
-                    this.logger.warn(`Not uploading ${itemPath}: ${kationError.message}`);
-                    this.storageFull = true;
-                } else {
-                    this.logger.error(`Failed to sync ${itemPath}`, error);
-                    this.status.message = `${itemPath}: ${kationError.message}`;
-                }
-                if (!this.failedItems.has(itemPath)) {
-                    this.failedItems.add(itemPath);
-                    // The KDE side words link and storage problems from the reason, not from an English detail.
-                    // A full storage is reported once, not for each of the files waiting.
-                    if (!full || !this.storageFullReported) {
-                        this.activity('error', itemPath, linked || full ? '' : kationError.message);
+                try {
+                    let localItem = local.get(name);
+                    let baseEntry = base.get(name);
+                    let remoteItem = remote.get(name);
+                    if (this.movesThisPass !== movesAtScan) {
+                        // A move since the scan may have taken this item away or brought one here.
+                        localItem = await statItem(this.absolute(itemPath));
+                        baseEntry = this.options.state.get(itemPath);
+                        if (source === 'base') {
+                            remoteItem = baseEntry && remoteItemFromBase(baseEntry);
+                        } else if (remoteItem && this.movedOnProton.has(remoteItem.uid) && baseEntry?.remoteUid !== remoteItem.uid) {
+                            // Listed before this pass moved it away on Proton.
+                            remoteItem = undefined;
+                        } else if (!remoteItem && baseEntry && this.movedOnProton.has(baseEntry.remoteUid)) {
+                            remoteItem = remoteItemFromBase(baseEntry);
+                        }
                     }
-                    this.storageFullReported ||= full;
-                    this.options.onItemsChanged?.([itemPath]);
-                }
-                if (!errors.includes(folder)) {
-                    errors.push(folder);
+                    await this.reconcileItem(context, itemPath, localItem, remoteItem, baseEntry, fresh, recursive, errors, startFile);
+                } catch (error: unknown) {
+                    await failed(error, itemPath);
                 }
             }
+        } catch (error: unknown) {
+            walkError = error;
+            if (!(error instanceof LocalFolderGone)) {
+                this.failPass(error);
+            }
+        }
+        await Promise.all(jobs);
+        // Before walkError, which may be only the cancellation it caused.
+        if (this.passFailure !== undefined) {
+            throw this.passFailure;
+        }
+        if (walkError !== undefined) {
+            throw walkError;
+        }
+        if (gone) {
+            throw gone;
         }
         if (source === 'list') {
             // Listed from the server: skipped items not seen again were renamed, moved or deleted.
@@ -908,6 +921,100 @@ export class SyncEngine {
                 }
             }
         }
+    }
+
+    /**
+     * An item of `context`'s folder could not be synced: reports it, or retries it later.
+     * Throws what must stop the folder (LocalFolderGone) or the pass.
+     */
+    private async itemFailed(
+        error: unknown,
+        context: FolderContext,
+        itemPath: string,
+        remoteOnly: boolean,
+        skipped: Set<string>,
+        errors: string[],
+    ): Promise<void> {
+        const folder = context.path;
+        if (error instanceof SafetyPause) {
+            throw error;
+        }
+        const kationError = toKationError(error);
+        if (PASS_ABORTING_CODES.has(kationError.code)) {
+            throw kationError;
+        }
+        // A file system with a lower limit (eCryptfs), or a path too long as a whole.
+        if (remoteOnly && isNameTooLong(error)) {
+            this.skipTooLong(itemPath);
+            skipped.add(itemPath);
+            return;
+        }
+        const goneLocally = isGoneLocally(error);
+        if (goneLocally && !context.localMayBeMissing) {
+            // The whole folder may have gone, not just this item: then stop working in it.
+            await this.checkLocalFolder(folder);
+        }
+        if (goneLocally && !this.notFoundRetried.has(itemPath)) {
+            this.notFoundRetried.add(itemPath);
+            this.logger.info(`${itemPath} was removed here during sync; checking again`);
+            // Listed again from the server: a remote change this pass saw must not be forgotten.
+            this.markDirty(folder, true);
+            return;
+        }
+        if (kationError.code === 'NotFound' && !goneLocally && !this.notFoundRetried.has(itemPath)) {
+            // Usually a race: the item or its folder changed on Proton during this pass
+            // (for example trashed), and the event has not been applied yet. List the
+            // folder again from the server once before calling it an error.
+            this.notFoundRetried.add(itemPath);
+            this.logger.warn(`${itemPath} changed on Proton during sync (${kationError.message}); checking again`);
+            this.markDirty(folder, true);
+            return;
+        }
+        const linked = error instanceof LinkInTheWay;
+        const full = kationError.code === 'QuotaExceeded';
+        if (linked) {
+            this.logger.warn(`Not syncing ${itemPath}: ${kationError.message}`);
+            this.linkInTheWay = true;
+        } else if (full) {
+            this.logger.warn(`Not uploading ${itemPath}: ${kationError.message}`);
+            this.storageFull = true;
+        } else {
+            this.logger.error(`Failed to sync ${itemPath}`, error);
+            this.status.message = `${itemPath}: ${kationError.message}`;
+        }
+        if (!this.failedItems.has(itemPath)) {
+            this.failedItems.add(itemPath);
+            // The KDE side words link and storage problems from the reason, not from an English detail.
+            // A full storage is reported once, not for each of the files waiting.
+            if (!full || !this.storageFullReported) {
+                this.activity('error', itemPath, linked || full ? '' : kationError.message);
+            }
+            this.storageFullReported ||= full;
+            this.options.onItemsChanged?.([itemPath]);
+        }
+        if (!errors.includes(folder)) {
+            errors.push(folder);
+        }
+    }
+
+    /** Ends the pass with `error`: starts no more transfers and cancels the running ones. Ignored once the pass is ending. */
+    private failPass(error: unknown): void {
+        if (!this.transfers.signal.aborted) {
+            this.passFailure = error;
+            // Cancelled, not the error itself: the items cut short must not be reported with it.
+            this.transfers.abort(new KationError('Cancelled', 'The sync pass ended'));
+        }
+    }
+
+    /** Before moving items: a running transfer may be inside what moves, or about to record its base there. */
+    private async waitForTransfers(): Promise<void> {
+        await this.transfers.drain();
+        this.signal.throwIfAborted();
+    }
+
+    /** Aborted when the pass stops: paused, stopped, or failed. */
+    private get signal(): AbortSignal {
+        return this.transfers.signal;
     }
 
     private skipTooLong(itemPath: string): void {
@@ -979,6 +1086,7 @@ export class SyncEngine {
         fresh: boolean,
         recursive: boolean,
         errors: string[],
+        startFile: StartFile,
     ): Promise<void> {
         let local = localItem;
         let remote = remoteItem;
@@ -1021,23 +1129,27 @@ export class SyncEngine {
             if (base && base.type === local.type && !localChanged) {
                 await this.trashLocal(itemPath);
                 this.options.state.removeTree(itemPath);
-                return this.reconcileItem(parent, itemPath, undefined, remote, undefined, fresh, recursive, errors);
+                return this.reconcileItem(parent, itemPath, undefined, remote, undefined, fresh, recursive, errors, startFile);
             }
             if (base && base.type === remote.type && !remoteChanged) {
                 await this.trashRemote(itemPath, remote);
                 this.options.state.removeTree(itemPath);
-                return this.reconcileItem(parent, itemPath, local, undefined, undefined, fresh, recursive, errors);
+                return this.reconcileItem(parent, itemPath, local, undefined, undefined, fresh, recursive, errors, startFile);
             }
             const renamed = await this.keepLocalCopy(itemPath);
             this.options.state.removeTree(itemPath);
-            await this.reconcileItem(parent, renamed.path, renamed.item, undefined, undefined, fresh, recursive, errors);
-            return this.reconcileItem(parent, itemPath, undefined, remote, undefined, fresh, recursive, errors);
+            await this.reconcileItem(parent, renamed.path, renamed.item, undefined, undefined, fresh, recursive, errors, startFile);
+            return this.reconcileItem(parent, itemPath, undefined, remote, undefined, fresh, recursive, errors, startFile);
         }
 
         if (local?.type === 'folder' || remote?.type === 'folder') {
             return this.reconcileFolderItem(parent, itemPath, local, remote, base, fresh, recursive, errors);
         }
-        return this.reconcileFile(parent, itemPath, local, remote, base, localChanged, remoteChanged);
+        if (local && remote && base && !localChanged && !remoteChanged) {
+            // Nothing to do: it must not wait for a transfer to end.
+            return;
+        }
+        return startFile(itemPath, () => this.reconcileFile(parent, itemPath, local, remote, base, localChanged, remoteChanged));
     }
 
     private async reconcileFolderItem(
@@ -1073,16 +1185,21 @@ export class SyncEngine {
                     this.options.state.removeTree(itemPath);
                     return;
                 }
-                let recreated: NodeEntity | undefined;
+                // A promise: its files' uploads may ask for it at the same time. Forgotten on failure, so the next one tries again.
+                let recreating: Promise<NodeEntity> | undefined;
                 const context: FolderContext = {
                     path: itemPath,
-                    ensureRemote: async () => {
-                        recreated ??= await this.options.drive.createFolderIn(await parent.ensureRemote(), name);
-                        return recreated;
-                    },
+                    ensureRemote: () =>
+                        (recreating ??= (async () => this.options.drive.createFolderIn(await parent.ensureRemote(), name))().catch(
+                            (error: unknown) => {
+                                recreating = undefined;
+                                throw error;
+                            },
+                        )),
                 };
                 // Children still have their base: unchanged ones follow the deletion, changed ones are uploaded.
                 await this.reconcileFolder(context, 'empty', true, true, errors);
+                const recreated = await recreating?.catch(() => undefined);
                 if (recreated) {
                     this.recordFolder(itemPath, recreated.uid, local);
                 } else {
@@ -1241,75 +1358,80 @@ export class SyncEngine {
             throw new KationError('QuotaExceeded', 'The Proton Drive storage is full');
         }
         this.logger.info(`Uploading ${itemPath}${existing ? ' (new version)' : ''}`);
-        this.setStatus({ current: itemPath });
-        const remoteParent = await parent.ensureRemote();
-        let node: NodeEntity;
+        this.transferStarted(itemPath);
         try {
-            node = await this.options.drive.uploadFile(remoteParent, nameOf(itemPath), this.absolute(itemPath), existing, {
-                signal: this.abort.signal,
-            });
-        } catch (error: unknown) {
-            if (!existing && toKationError(error).code === 'AlreadyExists') {
-                // Appeared remotely meanwhile: list again and decide next pass.
-                this.markDirty(parentOf(itemPath), true);
-                return;
+            const remoteParent = await parent.ensureRemote();
+            let node: NodeEntity;
+            try {
+                node = await this.options.drive.uploadFile(remoteParent, nameOf(itemPath), this.absolute(itemPath), existing, {
+                    signal: this.signal,
+                });
+            } catch (error: unknown) {
+                if (!existing && toKationError(error).code === 'AlreadyExists') {
+                    // Appeared remotely meanwhile: list again and decide next pass.
+                    this.markDirty(parentOf(itemPath), true);
+                    return;
+                }
+                throw error;
             }
-            throw error;
+            // Record the state read before the upload: a change during the upload is uploaded next time.
+            this.recordFile(itemPath, local, {
+                name: nameOf(itemPath),
+                type: 'file',
+                uid: node.uid,
+                revision: node.activeRevision?.uid ?? null,
+                sha1: node.activeRevision?.claimedDigests?.sha1 ?? null,
+                size: node.activeRevision?.claimedSize ?? null,
+            });
+        } finally {
+            this.transferEnded(itemPath);
         }
-        // Record the state read before the upload: a change during the upload is uploaded next time.
-        this.recordFile(itemPath, local, {
-            name: nameOf(itemPath),
-            type: 'file',
-            uid: node.uid,
-            revision: node.activeRevision?.uid ?? null,
-            sha1: node.activeRevision?.claimedDigests?.sha1 ?? null,
-            size: node.activeRevision?.claimedSize ?? null,
-        });
-        this.setStatus({ current: '' });
         this.itemDone(itemPath, 'uploaded');
     }
 
     /** Downloads over `expected`, the local item the decision was based on (undefined: none). */
     private async download(itemPath: string, remote: RemoteItem, expected: LocalItem | undefined): Promise<void> {
         this.logger.info(`Downloading ${itemPath}`);
-        this.setStatus({ current: itemPath });
-        const node = remote.node ?? (await this.options.sdk.getNode(remote.uid));
-        await this.checkRootBeforeWrite();
-        await this.checkNoLinkAbove(itemPath);
-        await mkdir(this.absolute(parentOf(itemPath)), { recursive: true });
-        // A local edit saved while the download ran must not be overwritten: the next pass sees both changes.
-        const beforeReplace = async () => {
-            if (!sameLocalState(await statItem(this.absolute(itemPath)), expected)) {
-                throw new LocalChangedDuringDownload();
-            }
-            await this.checkNoLinkAbove(itemPath);
-        };
+        this.transferStarted(itemPath);
         try {
-            await this.options.drive.downloadNode(node, this.absolute(itemPath), {
-                signal: this.abort.signal,
-                resumable: true,
-                beforeReplace,
-            });
-        } catch (error: unknown) {
-            if (error instanceof LocalChangedDuringDownload) {
-                this.logger.info(`${itemPath} changed here during its download; checking again`);
-                this.setStatus({ current: '' });
-                this.markDirty(parentOf(itemPath), true);
-                return;
+            const node = remote.node ?? (await this.options.sdk.getNode(remote.uid));
+            await this.checkRootBeforeWrite();
+            await this.checkNoLinkAbove(itemPath);
+            await mkdir(this.absolute(parentOf(itemPath)), { recursive: true });
+            // A local edit saved while the download ran must not be overwritten: the next pass sees both changes.
+            const beforeReplace = async () => {
+                if (!sameLocalState(await statItem(this.absolute(itemPath)), expected)) {
+                    throw new LocalChangedDuringDownload();
+                }
+                await this.checkNoLinkAbove(itemPath);
+            };
+            try {
+                await this.options.drive.downloadNode(node, this.absolute(itemPath), {
+                    signal: this.signal,
+                    resumable: true,
+                    beforeReplace,
+                });
+            } catch (error: unknown) {
+                if (error instanceof LocalChangedDuringDownload) {
+                    this.logger.info(`${itemPath} changed here during its download; checking again`);
+                    this.markDirty(parentOf(itemPath), true);
+                    return;
+                }
+                throw error;
             }
-            throw error;
+            await this.checkRootBeforeWrite();
+            const local = await statItem(this.absolute(itemPath));
+            if (!local) {
+                throw new Error(`Downloaded file disappeared: ${itemPath}`);
+            }
+            this.recordFile(itemPath, local, {
+                ...remote,
+                revision: node.activeRevision?.uid ?? remote.revision,
+                sha1: node.activeRevision?.claimedDigests?.sha1 ?? remote.sha1,
+            });
+        } finally {
+            this.transferEnded(itemPath);
         }
-        await this.checkRootBeforeWrite();
-        const local = await statItem(this.absolute(itemPath));
-        if (!local) {
-            throw new Error(`Downloaded file disappeared: ${itemPath}`);
-        }
-        this.recordFile(itemPath, local, {
-            ...remote,
-            revision: node.activeRevision?.uid ?? remote.revision,
-            sha1: node.activeRevision?.claimedDigests?.sha1 ?? remote.sha1,
-        });
-        this.setStatus({ current: '' });
         this.itemDone(itemPath, 'downloaded');
     }
 
@@ -1399,7 +1521,7 @@ export class SyncEngine {
                 return;
             }
             seen.add(folder);
-            this.abort.signal.throwIfAborted();
+            this.signal.throwIfAborted();
             let local: Map<string, LocalItem>;
             try {
                 local = await scanFolder(this.absolute(folder));
@@ -1483,6 +1605,7 @@ export class SyncEngine {
 
     /** Moves the node of `base` on Proton to `toPath`, where its local item now is. False: sync it as a new item instead. */
     private async applyLocalMove(base: BaseEntry, toPath: string, item: LocalItem): Promise<boolean> {
+        await this.waitForTransfers();
         const from = base.path;
         const node = await this.getNodeOrUndefined(base.remoteUid);
         if (!node || node.trashTime || !node.name.ok) {
@@ -1608,6 +1731,7 @@ export class SyncEngine {
         if (to === from || to.startsWith(`${from}/`)) {
             return false;
         }
+        await this.waitForTransfers();
         await this.checkRootBeforeWrite();
         if ((await statItem(this.absolute(to))) || (await isLinkOrSpecial(this.absolute(to)))) {
             return false;
@@ -1667,7 +1791,7 @@ export class SyncEngine {
         if (!remote.sha1) {
             return false;
         }
-        return (await sha1Of(this.absolute(itemPath), this.abort.signal)) === remote.sha1;
+        return (await sha1Of(this.absolute(itemPath), this.signal)) === remote.sha1;
     }
 
     /** Whether nothing under a local folder is new or modified since the last sync. */
@@ -1900,6 +2024,25 @@ export class SyncEngine {
         }
     }
 
+    private transferStarted(itemPath: string): void {
+        this.signal.throwIfAborted();
+        this.transferring.add(itemPath);
+        this.setStatus({ current: itemPath });
+    }
+
+    /** `current` moves on to another running transfer, the one started last. */
+    private transferEnded(itemPath: string): void {
+        if (!this.transferring.delete(itemPath)) {
+            return; // cleared by a pause or stop
+        }
+        const current = [...this.transferring].at(-1) ?? '';
+        if (current === this.status.current) {
+            this.options.onItemsChanged?.([itemPath]);
+        } else {
+            this.setStatus({ current });
+        }
+    }
+
     private activity(kind: SyncActivity['kind'], itemPath: string, detail = ''): void {
         this.options.onActivity?.({ time: Math.floor(this.options.now() / 1000), kind, path: itemPath, detail });
     }
@@ -1928,7 +2071,7 @@ export class SyncEngine {
         if ([...this.failedItems].some(inside)) {
             return 'error';
         }
-        if (this.status.current && inside(this.status.current)) {
+        if ([...this.transferring].some(inside)) {
             return 'syncing';
         }
         const waiting: ItemState = this.paused || this.status.state === 'paused' ? 'paused' : 'pending';
