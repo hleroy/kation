@@ -160,9 +160,6 @@ void TrayTest::escapesFileNamesInTheTooltip()
 
     const QString name = u"<b>x<br>y.txt"_s;
     write(local(name), QByteArray(512 * 1024, 'x'));
-    // Escaped, a name with only "&" holds no tag: the tooltip must still be read as rich text.
-    const QString ampersand = u"Tom & Jerry.txt"_s;
-    write(local(ampersand), QByteArray(512 * 1024, 'x'));
     KationDriveInterface drive(Kation::serviceName, Kation::objectPath, QDBusConnection::sessionBus());
     drive.SetSyncEnabled(true).waitForFinished();
     QTRY_VERIFY_WITH_TIMEOUT(m_tray->statusText().contains(name), 10000);
@@ -173,6 +170,10 @@ void TrayTest::escapesFileNamesInTheTooltip()
     QVERIFY(!item->toolTipSubTitle().contains(name));
     QVERIFY(m_tray->menu()->actions().first()->text().contains(name));
 
+    // Written now, not with the first: files transfer in parallel, and the status shows the one started last.
+    // Escaped, a name with only "&" holds no tag: the tooltip must still be read as rich text.
+    const QString ampersand = u"Tom & Jerry.txt"_s;
+    write(local(ampersand), QByteArray(512 * 1024, 'x'));
     QTRY_VERIFY_WITH_TIMEOUT(m_tray->statusText().contains(ampersand), 20000);
     QVERIFY2(Qt::mightBeRichText(item->toolTipSubTitle()) && item->toolTipSubTitle().contains(u"Tom &amp; Jerry.txt"_s), qPrintable(item->toolTipSubTitle()));
 
