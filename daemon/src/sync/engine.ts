@@ -562,13 +562,17 @@ export class SyncEngine {
         if (this.pausedFor) {
             return;
         }
+        // Paused by the user while the pass was ending: its failure must not replace that pause. Resuming checks again.
+        if (this.paused) {
+            return;
+        }
         if (error instanceof SafetyPause) {
             this.pauseFor(error);
             return;
         }
         const kationError = toKationError(error);
         // Stopped by a pause (possibly already resumed): the work was put back above.
-        if (kationError.code === 'Cancelled' && (this.paused || this.stopped || abortedOnPurpose)) {
+        if (kationError.code === 'Cancelled' && (this.stopped || abortedOnPurpose)) {
             return;
         }
         this.logger.error('Sync pass failed', error);
@@ -1140,6 +1144,10 @@ export class SyncEngine {
 
         if (local?.type === 'folder' || remote?.type === 'folder') {
             return this.reconcileFolderItem(parent, itemPath, local, remote, base, fresh, recursive, errors);
+        }
+        if (local && remote && base && !localChanged && !remoteChanged) {
+            // Nothing to do: it must not wait for a transfer to end.
+            return;
         }
         return startFile(itemPath, () => this.reconcileFile(parent, itemPath, local, remote, base, localChanged, remoteChanged));
     }

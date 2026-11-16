@@ -375,12 +375,7 @@ export class DriveService {
         return this.uploadedBytes.reduce((sum, entry) => sum + entry.bytes, this.uploadingBytes);
     }
 
-    /**
-     * Holds `size` bytes of storage for an upload, as Proton's Windows app does, so that
-     * uploads running at once do not overshoot the quota. The whole size, also for a new
-     * revision. Throws QuotaExceeded, without contacting Proton, when it does not fit in
-     * what the latest storage reading leaves free. Returns the function that releases it.
-     */
+    /** Holds the whole `size` (also for a new revision), as Proton's Windows app does; returns the function that releases it. */
     private reserveSpace(size: number): (uploaded: boolean) => void {
         const storage = this.hooks.storage;
         const free = storage?.latest().free;

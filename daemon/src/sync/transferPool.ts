@@ -20,11 +20,7 @@ export class TransferPool {
         this.signal.addEventListener('abort', () => this.wakeAll(), { once: true });
     }
 
-    /**
-     * Waits for a free slot, then starts `job` and returns without waiting for it:
-     * `done` settles as the job does. Once the pool is aborted, starts nothing and
-     * throws the signal's reason.
-     */
+    /** Returns once `job` has started, not ended (`done` settles as it does). Throws the signal's reason once aborted. */
     async run<T>(job: () => Promise<T>): Promise<{ done: Promise<T> }> {
         while (this.active.size >= this.limit && !this.signal.aborted) {
             await new Promise<void>((resolve) => this.slotWaiters.push(resolve));

@@ -2139,6 +2139,39 @@ describe('SyncEngine parallel transfers', () => {
         expect([...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort()).toEqual(names('up', 8));
     });
 
+    it('stays paused by the user when a transfer failed the pass just before', async () => {
+        const ctx = await setup({ fake: slowFake(5) });
+        let failing = true;
+        const uploadFile = ctx.drive.uploadFile;
+        ctx.drive.uploadFile = async (parent, name, ...rest) => {
+            if (failing && name === 'up01.txt') {
+                failing = false;
+                await Bun.sleep(15);
+                // Paused while up00.txt, which does not stop at once, is still ending.
+                setTimeout(() => ctx.engine.setPaused(true), 20);
+                throw new KationError('Connection', 'Offline');
+            }
+            if (name === 'up00.txt') {
+                await Bun.sleep(80);
+            }
+            return uploadFile.call(ctx.drive, parent, name, ...rest);
+        };
+        await mkdir(ctx.root, { recursive: true });
+        for (const name of names('up', 2)) {
+            await edit(ctx.local(name), name);
+        }
+        await ctx.engine.start();
+        await Bun.sleep(50);
+        await ctx.engine.whenIdle();
+
+        expect(ctx.engine.getStatus()).toMatchObject({ state: 'paused', reason: 'user', message: 'Paused' });
+
+        ctx.engine.setPaused(false);
+        await ctx.settle();
+        expect(ctx.engine.getStatus().state).toBe('idle');
+        expect([...ctx.fake.childrenOf(ctx.fake.rootUid).keys()].sort()).toEqual(names('up', 2));
+    });
+
     for (const how of ['pause', 'stop'] as const) {
         it(`writes nothing once ${how === 'pause' ? 'paused' : 'stopped'} during transfers${how === 'pause' ? ', and resumes them' : ''}`, async () => {
             const ctx = await setup({ fake: slowFake(20) });
