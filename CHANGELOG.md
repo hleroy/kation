@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-17
+
 ### Added
 
 - The `.rpm` is signed, so `rpm -U` installs it without `--nosignature` once the key is imported (see the README).
@@ -113,7 +115,8 @@ Initial release; its scope is in [ROADMAP.md](ROADMAP.md).
 - Debian, Fedora and Arch packages: `./build-package.sh` builds one for the distribution it runs on.
 - GitHub releases come with packages for Debian 13, Fedora 43 and Arch Linux.
 
-[Unreleased]: https://github.com/hleroy/kation/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/hleroy/kation/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/hleroy/kation/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/hleroy/kation/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/hleroy/kation/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/hleroy/kation/compare/v0.2.0...v0.3.0
