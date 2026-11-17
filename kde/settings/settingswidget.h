@@ -84,6 +84,7 @@ private:
 
     // Folders to sync
     void loadFolderTree();
+    void showFoldersHint();
     void loadChildren(QTreeWidgetItem *parent, const QString &path);
     void folderToggled(QTreeWidgetItem *item);
     void updateFolderItems(QTreeWidgetItem *root = nullptr);

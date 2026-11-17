@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { describe, expect, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import { type DriveEvent, DriveEventType } from '@protontech/drive-sdk';
 import { getMockLogger } from '@protontech/drive-sdk/tests/logger';
@@ -9,6 +12,7 @@ import { getMockLogger } from '@protontech/drive-sdk/tests/logger';
 import { EventPoller, type EventsSdk } from '../src/events';
 import { MemoryEventsProvider } from '../src/proton/events/providerMemory';
 import { NoEventsProvider } from '../src/proton/events/providerNoEvents';
+import { PersistedEventsProvider } from '../src/proton/events/providerPersisted';
 
 type Call = { scope: string; lastEventId?: string; signal?: AbortSignal };
 type Reply = DriveEvent[] | Error | 'hang';
@@ -142,6 +146,30 @@ describe('EventPoller', () => {
 
         expect(await provider.getLatestEventId('vol')).toBeNull();
         expect(poller.running).toBe(false);
+    });
+
+    it('does not poll the volumes of the previous session after clear, with the persisted provider', async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), 'kation-events-'));
+        const provider = await PersistedEventsProvider.open(getMockLogger(), dir);
+        try {
+            await provider.setLatestEventId('drive', 'old', 'o0');
+            const { sdk, calls } = fakeSdk(() => []);
+            const poller = new EventPoller(getMockLogger(), sdk, provider, undefined, fast);
+            poller.start();
+            await Bun.sleep(10);
+            await poller.clear();
+            const callsBefore = calls.length;
+
+            poller.start();
+            await Bun.sleep(50);
+            await poller.stop();
+
+            expect(calls.length).toBe(callsBefore);
+            expect(provider.getInitialSubscriptionScopeIds()).toEqual([]);
+        } finally {
+            await provider.dispose();
+            await rm(dir, { recursive: true, force: true });
+        }
     });
 
     it('stops following a volume that is gone', async () => {

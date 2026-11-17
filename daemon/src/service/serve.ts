@@ -209,9 +209,19 @@ async function createProtonBackend(config: Config, onEvent: (event: DriveEvent) 
             onSessionChanged: (listener) => drive.onSessionChanged(listener),
         },
         startEvents: async () => {
-            drive.events.start();
-            // Changes inside "My files" arrive on its volume's event scope.
-            const root = await drive.sdk.getMyFilesRootFolder();
+            // Changes inside "My files" arrive on its volume's event scope. Read it before
+            // polling: the stored scopes may be another account's, after a lost session.
+            // The session can end (sign-out, failed refresh) while the root is read: stopEvents then had nothing to stop.
+            const startPolling = () => {
+                if (drive.auth.isLoggedIn()) {
+                    drive.events.start();
+                }
+            };
+            const root = await drive.sdk.getMyFilesRootFolder().catch((error: unknown) => {
+                startPolling();
+                throw error;
+            });
+            startPolling();
             await drive.events.followOnly(root.treeEventScopeId);
         },
         stopEvents: () => drive.events.stop(),

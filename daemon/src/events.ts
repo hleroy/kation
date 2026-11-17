@@ -91,14 +91,15 @@ export class EventPoller {
         if (!this.abort) {
             return;
         }
-        for (const [scopeId, scope] of this.scopes) {
-            if (scopeId !== treeEventScopeId) {
-                clearTimeout(scope.timer);
-                this.scopes.delete(scopeId);
-                await this.provider.removeScope('drive', scopeId);
-            }
+        const dropped = [...this.scopes.keys()].filter((scopeId) => scopeId !== treeEventScopeId);
+        for (const scopeId of dropped) {
+            clearTimeout(this.scopes.get(scopeId)?.timer);
+            this.scopes.delete(scopeId);
         }
         this.addScope(treeEventScopeId);
+        for (const scopeId of dropped) {
+            await this.provider.removeScope('drive', scopeId);
+        }
     }
 
     /** Stops polling and waits for running requests to end. Cursors are kept. */
@@ -118,6 +119,12 @@ export class EventPoller {
     /** Stops polling and forgets the cursors (sign-out). */
     async clear(): Promise<void> {
         await this.stop();
+        // The persisted provider's clear() deletes its file but keeps the cursors in memory.
+        for (const { context, treeEventScopeIds } of this.provider.getInitialSubscriptionScopeIds()) {
+            for (const scopeId of treeEventScopeIds) {
+                await this.provider.removeScope(context, scopeId);
+            }
+        }
         await this.provider.clear();
     }
 

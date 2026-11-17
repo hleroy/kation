@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Signing in to another account without restarting Kation no longer fails with "Item not found": Kation kept the previous account's root folder.
+- Signing in to another account without restarting Kation no longer fails with "Item not found", and Folders to Sync no longer keeps showing an error once the folders load.
 
 ## [0.4.0] - 2026-11-15
 
