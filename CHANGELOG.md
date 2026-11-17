@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The `.rpm` is signed, so `rpm -U` installs it without `--nosignature` once the key is imported (see the README).
+
 ## [0.5.0] - 2026-11-17
 
 ### Changed

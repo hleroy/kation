@@ -47,9 +47,66 @@ jobs:
     needs: check
     uses: ./.github/workflows/packages.yml
 
+  # rpm -U refuses an unsigned package where signature checking is enforced
+  # (rpm 6). The RPM_SIGNING_KEY secret holds the armored private key, without
+  # passphrase; packaging/rpm/RPM-GPG-KEY-kation is its public key.
+  sign-rpm:
+    name: Sign the RPM package
+    needs: packages
+    runs-on: ubuntu-24.04
+    # Refresh: docker buildx imagetools inspect fedora:43
+    container: fedora:43@sha256:f01112b9a1f1d0504ad962d9adfa401425033f8ab067e0a821904ebdde5b8ca5
+    steps:
+      - name: Install rpmsign
+        run: dnf -y -q install --setopt=install_weak_deps=False rpm-sign gnupg2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kation-fedora43-rpm
+          path: dist
+      - name: Sign the package
+        env:
+          RPM_SIGNING_KEY: ${{ secrets.RPM_SIGNING_KEY }}
+        run: |
+          if [ -z "$RPM_SIGNING_KEY" ]; then
+            echo "::error::The RPM_SIGNING_KEY secret is not set: see DEVNOTES.md, \"Signing the RPM package\"."
+            exit 1
+          fi
+          GNUPGHOME="$(mktemp -d)"
+          export GNUPGHOME
+          printf '%s\n' "$RPM_SIGNING_KEY" | gpg --batch --quiet --import
+          fingerprint="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
+          if [ -z "$fingerprint" ]; then
+            echo "::error::RPM_SIGNING_KEY holds no private key: it must be the output of gpg --armor --export-secret-keys."
+            exit 1
+          fi
+          # rpm 6 reads _openpgp_sign_id, older releases _gpg_name.
+          rpmsign --addsign --define "_openpgp_sign_id $fingerprint" \
+            --define "_gpg_name $fingerprint" dist/*.rpm
+          gpgconf --kill all
+          rm -rf "$GNUPGHOME"
+      # Fails when the secret and the published public key do not match.
+      - name: Check the signature with the published key
+        run: |
+          rpmkeys --import packaging/rpm/RPM-GPG-KEY-kation
+          result="$(rpmkeys --checksig dist/*.rpm)" || true
+          echo "$result"
+          case "$result" in
+            *"signatures OK"*) ;;
+            *) echo "::error::The package does not verify with packaging/rpm/RPM-GPG-KEY-kation."; exit 1 ;;
+          esac
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kation-fedora43-rpm
+          path: dist/*.rpm
+          if-no-files-found: error
+          overwrite: true
+
   release:
     name: GitHub release
-    needs: packages
+    needs: [packages, sign-rpm]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -104,6 +161,14 @@ jobs:
           sha256sum -c SHA256SUMS --ignore-missing
           gh attestation verify <package file> --repo hleroy/kation \
               --signer-workflow hleroy/kation/.github/workflows/release.yml
+          ```
+
+          The `.rpm` is signed with the key `ED2B 436B BDBA 252B FA7B CE56 F2B6 0C49 1602 3761`.
+          Import it once, and `rpm` checks the signature on every install or upgrade:
+
+          ```sh
+          sudo rpm --import https://raw.githubusercontent.com/hleroy/kation/main/packaging/rpm/RPM-GPG-KEY-kation
+          rpm -K kation-*.rpm
           ```
           EOF
           } > notes.md
