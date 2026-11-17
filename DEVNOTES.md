@@ -236,3 +236,22 @@ gpgconf --kill all; rm -rf "$GNUPGHOME"; unset GNUPGHOME
 
 A new key breaks `rpm -U` for users who imported the old one until they
 import the new one: say so in the changelog.
+
+The secret is repository-wide, so any workflow pushed to the repository
+can read it. That is fine while there is a single contributor. Before giving
+anyone write access, move it to a `release` environment that only `v*` tags
+can use, and restrict who can create those tags:
+
+```sh
+gh api -X PUT repos/hleroy/kation/environments/release --input - <<'EOF'
+{"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+EOF
+gh api -X POST repos/hleroy/kation/environments/release/deployment-branch-policies \
+  -f name='v*' -f type=tag
+gh secret set RPM_SIGNING_KEY --env release < ~/kation-rpm-signing-key.asc   # from the backup
+gh secret delete RPM_SIGNING_KEY --repo hleroy/kation
+```
+
+Then add `environment: release` to the `sign-rpm` job in `release.yml`, and
+add a tag ruleset (Settings → Rules → Rulesets) on `v*` with "Restrict
+creations", with yourself as the bypass actor.
