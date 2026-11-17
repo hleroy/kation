@@ -55,6 +55,16 @@ sudo dnf install ./kation-*.fc43.x86_64.rpm      # Fedora 43
 sudo pacman -U kation-*-x86_64.pkg.tar.zst       # Arch Linux
 ```
 
+Releases after 0.5.0 sign the `.rpm`. `dnf install` of a downloaded file
+does not check signatures, but `rpm -U` does where signature checking is
+enforced: import the signing key once first. Its fingerprint is
+`ED2B 436B BDBA 252B FA7B CE56 F2B6 0C49 1602 3761`.
+
+```sh
+sudo rpm --import https://raw.githubusercontent.com/hleroy/kation/main/packaging/rpm/RPM-GPG-KEY-kation
+rpm -K kation-*.fc43.x86_64.rpm                 # "digests signatures OK"
+```
+
 Installing or upgrading the package restarts Kation's background service in
 the sessions where it runs, and the tray icon follows (from 0.4.0 on: when
 upgrading from an older version, quit Kation from its tray menu and start it

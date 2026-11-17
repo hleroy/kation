@@ -194,7 +194,7 @@ Proton **test** account (`bun e2e/realAccount.ts --expect-email …`).
 ## Releasing
 
 1. Refresh the CI container digests (`debian:trixie`, `fedora:43`,
-   `archlinux:latest` in `ci.yml` and `packages.yml`). They are pinned by
+   `archlinux:latest` in `ci.yml`, `packages.yml` and `release.yml`). They are pinned by
    digest, which Dependabot does not update: run the command in the comment
    next to each (`docker buildx imagetools inspect <image>`) and copy the new
    digest.
@@ -211,3 +211,47 @@ release with the changelog section as notes, `SHA256SUMS` and a build
 provenance attestation for each package. To redo a release, delete it
 and its tag first (`gh release delete vx.y.z --cleanup-tag`): the workflow
 fails when the release already exists.
+
+### Signing the RPM package
+
+The Release workflow signs the `.rpm` with the key in the `RPM_SIGNING_KEY`
+repository secret (an armored private key without passphrase), then checks
+the signature against `packaging/rpm/RPM-GPG-KEY-kation`, so the secret and
+the published public key must match. The `.deb` and the Arch package are
+not signed: `apt install ./file` and `pacman -U` (`LocalFileSigLevel =
+Optional`) do not ask for it.
+
+To create or replace the key, in a throwaway keyring, from the repository
+root (the backup goes outside it: the key has no passphrase):
+
+```sh
+export GNUPGHOME="$(mktemp -d)"
+gpg --batch --passphrase '' --quick-gen-key 'Kation package signing' rsa4096 sign never
+gpg --armor --export-secret-keys > ~/kation-rpm-signing-key.asc   # move it offline
+gh secret set RPM_SIGNING_KEY < ~/kation-rpm-signing-key.asc
+gpg --armor --export > packaging/rpm/RPM-GPG-KEY-kation
+gpg --fingerprint                    # update the fingerprint in README.md and release.yml
+gpgconf --kill all; rm -rf "$GNUPGHOME"; unset GNUPGHOME
+```
+
+A new key breaks `rpm -U` for users who imported the old one until they
+import the new one: say so in the changelog.
+
+The secret is repository-wide, so any workflow pushed to the repository
+can read it. That is fine while there is a single contributor. Before giving
+anyone write access, move it to a `release` environment that only `v*` tags
+can use, and restrict who can create those tags:
+
+```sh
+gh api -X PUT repos/hleroy/kation/environments/release --input - <<'EOF'
+{"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+EOF
+gh api -X POST repos/hleroy/kation/environments/release/deployment-branch-policies \
+  -f name='v*' -f type=tag
+gh secret set RPM_SIGNING_KEY --env release < ~/kation-rpm-signing-key.asc   # from the backup
+gh secret delete RPM_SIGNING_KEY --repo hleroy/kation
+```
+
+Then add `environment: release` to the `sign-rpm` job in `release.yml`, and
+add a tag ruleset (Settings → Rules → Rulesets) on `v*` with "Restrict
+creations", with yourself as the bypass actor.
