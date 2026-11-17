@@ -470,16 +470,24 @@ async function main(): Promise<number> {
             REMOTE_TIMEOUT_MS,
             200,
         );
-        await Bun.sleep(500);
+        const downloaded = async () => {
+            const parts = (await readdir(local(''))).filter((name) => name.startsWith('.big.bin.') && name.endsWith('.kation-part'));
+            return parts[0] ? ((await stat(local(parts[0])).catch(() => undefined))?.size ?? 0) : 0;
+        };
+        // The first decrypted block takes a while to arrive: pause only once some of it is on disk.
+        const enough = Math.min(8 * 1024 * 1024, BIG_BYTES / 4);
+        await waitFor(
+            'part of big.bin on disk',
+            async () => (await downloaded()) >= enough || existsSync(local('big.bin')),
+            REMOTE_TIMEOUT_MS,
+            100,
+        );
         await call('SetSyncPaused', true);
         await waitFor('paused state', async () => (await syncStatus()).state === 'paused', 15_000);
-        const parts = (await readdir(local(''))).filter((name) => name.startsWith('.big.bin.') && name.endsWith('.kation-part'));
-        const partSize = parts[0] ? (await stat(local(parts[0]))).size : 0;
+        const partSize = await downloaded();
         if (partSize === 0) {
             await call('SetSyncPaused', false);
-            throw new Skip(
-                `the download finished (or had not written anything) when paused; rerun with a larger --big-mb (now ${options['big-mb']})`,
-            );
+            throw new Skip(`the download finished before it could be paused; rerun with a larger --big-mb (now ${options['big-mb']})`);
         }
         log(`paused with ${(partSize / 1024 / 1024).toFixed(1)} MB downloaded`);
         await Bun.sleep(3000);
