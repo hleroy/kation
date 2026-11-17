@@ -195,11 +195,15 @@ async function createProtonBackend(config: Config, onEvent: (event: DriveEvent) 
         problem: drive.problem,
         account: {
             isLoggedIn: () => drive.auth.isLoggedIn(),
-            loadSession: () => drive.auth.loadSession(),
+            loadSession: async () => {
+                drive.renewSdk();
+                await drive.auth.loadSession();
+            },
             getEmail: async () => (await drive.addresses.getOwnPrimaryAddress()).email,
             getStorage: () => drive.getStorage(),
             authViaWeb: async (onSignInUrl, signal) => {
                 await drive.auth.authViaWeb(onSignInUrl, signal);
+                drive.renewSdk();
             },
             logout: () => drive.signOut(),
             onSessionChanged: (listener) => drive.onSessionChanged(listener),
@@ -208,7 +212,7 @@ async function createProtonBackend(config: Config, onEvent: (event: DriveEvent) 
             drive.events.start();
             // Changes inside "My files" arrive on its volume's event scope.
             const root = await drive.sdk.getMyFilesRootFolder();
-            drive.events.addScope(root.treeEventScopeId);
+            await drive.events.followOnly(root.treeEventScopeId);
         },
         stopEvents: () => drive.events.stop(),
         // signOut (via logout) already cleared the SDK caches and event cursors.

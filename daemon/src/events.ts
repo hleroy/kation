@@ -83,6 +83,24 @@ export class EventPoller {
         this.schedule(treeEventScopeId, 0);
     }
 
+    /**
+     * Follows this volume only, and forgets the cursors of the others: those of
+     * another account remain when its session was lost instead of signed out.
+     */
+    async followOnly(treeEventScopeId: string): Promise<void> {
+        if (!this.abort) {
+            return;
+        }
+        for (const [scopeId, scope] of this.scopes) {
+            if (scopeId !== treeEventScopeId) {
+                clearTimeout(scope.timer);
+                this.scopes.delete(scopeId);
+                await this.provider.removeScope('drive', scopeId);
+            }
+        }
+        this.addScope(treeEventScopeId);
+    }
+
     /** Stops polling and waits for running requests to end. Cursors are kept. */
     async stop(): Promise<void> {
         if (!this.abort) {
@@ -140,7 +158,8 @@ export class EventPoller {
     private async readEvents(scopeId: string, signal: AbortSignal): Promise<boolean> {
         const lastEventId = (await this.provider.getLatestEventId(scopeId)) ?? undefined;
         for await (const event of this.sdk.iterateEvents(scopeId, lastEventId, signal)) {
-            if (signal.aborted) {
+            // No longer followed (followOnly): do not store its cursor again.
+            if (signal.aborted || !this.scopes.has(scopeId)) {
                 return false;
             }
             if (event.type === DriveEventType.TreeRemove) {

@@ -158,6 +158,55 @@ describe('EventPoller', () => {
         expect(await provider.getLatestEventId('vol')).toBeNull();
     });
 
+    it('follows only the given volume and forgets the cursors of the others', async () => {
+        const provider = new MemoryEventsProvider();
+        await provider.setLatestEventId('drive', 'old', 'o0');
+        await provider.setLatestEventId('drive', 'vol', 'e0');
+        const { sdk, calls } = fakeSdk((call) => (call.scope === 'old' ? new Error('422 no share memberships') : []));
+        const poller = new EventPoller(getMockLogger(), sdk, provider, undefined, fast);
+
+        poller.start();
+        await Bun.sleep(10);
+        await poller.followOnly('vol');
+        const callsBefore = calls.length;
+        await Bun.sleep(100);
+        await poller.stop();
+
+        expect(calls.slice(callsBefore).every((call) => call.scope === 'vol')).toBe(true);
+        expect(calls.length).toBeGreaterThan(callsBefore);
+        expect(await provider.getLatestEventId('old')).toBeNull();
+        expect(await provider.getLatestEventId('vol')).toBe('e0');
+    });
+
+    it('does not store the cursor of a volume dropped while it was being read', async () => {
+        const provider = new MemoryEventsProvider();
+        await provider.setLatestEventId('drive', 'old', 'o0');
+        let release: () => void = () => {};
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const sdk: EventsSdk = {
+            async *iterateEvents(scope: string) {
+                if (scope === 'old') {
+                    await gate;
+                    yield nodeCreated('old', 'o1');
+                }
+            },
+        };
+        const seen: DriveEvent[] = [];
+        const poller = new EventPoller(getMockLogger(), sdk, provider, (event) => seen.push(event), fast);
+
+        poller.start();
+        await Bun.sleep(10);
+        await poller.followOnly('vol');
+        release();
+        await Bun.sleep(10);
+        await poller.stop();
+
+        expect(await provider.getLatestEventId('old')).toBeNull();
+        expect(seen).toEqual([]);
+    });
+
     it('keeps polling after errors, more slowly', async () => {
         const provider = new MemoryEventsProvider();
         await provider.setLatestEventId('drive', 'vol', 'e0');

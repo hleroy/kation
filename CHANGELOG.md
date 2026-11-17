@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Sync transfers up to 4 files at once, so folders of many small files sync much faster; uploads that would not fit in the remaining storage are not started.
 
+### Fixed
+
+- Signing in to another account without restarting Kation no longer fails with "Item not found": Kation kept the previous account's root folder.
+
 ## [0.4.0] - 2026-11-15
 
 ### TL;DR

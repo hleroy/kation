@@ -20,6 +20,7 @@ import { createCaches } from './proton/cache';
 import { getOrGenerateClientUid } from './proton/clientUid';
 import { Credentials } from './proton/credentials/credentials';
 import { PersistedEventsProvider } from './proton/events/providerPersisted';
+import { replaceable } from './replaceable';
 import { driveStorageOf, type Storage, type StorageFields } from './service/storage';
 
 /** Same flags as the official CLI build. */
@@ -63,7 +64,9 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
             isEnabled: (flag: FeatureFlags) => Promise.resolve(FEATURE_FLAGS[flag] ?? false),
         },
     };
-    const sdk = new ProtonDriveClient(sdkDependencies);
+    // The SDK keeps the account's "My files" root and volume in memory, which only a new client forgets.
+    const client = replaceable(() => new ProtonDriveClient(sdkDependencies));
+    const sdk = client.current;
     // Started by `kationd serve` while signed in; other commands do not poll.
     const events = new EventPoller(logger, sdk, eventsProvider, options.onEvent);
     // Again: on a first start, the code copied from the Proton CLI just created files with the umask's mode.
@@ -79,6 +82,8 @@ export async function openDrive(config: Config, options: { onEvent?: EventObserv
         auth,
         addresses,
         sdk,
+        /** Before a new session starts: it may belong to another account than the last one. */
+        renewSdk: client.replace,
         events,
         localLog,
         /** Calls `listener` when the session changes, including when Proton ends it. */
