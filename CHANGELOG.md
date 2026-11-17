@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-17
+
 ### Changed
 
 - Sync transfers up to 4 files at once, so folders of many small files sync much faster; uploads that would not fit in the remaining storage are not started.
@@ -107,7 +109,8 @@ Initial release; its scope is in [ROADMAP.md](ROADMAP.md).
 - Debian, Fedora and Arch packages: `./build-package.sh` builds one for the distribution it runs on.
 - GitHub releases come with packages for Debian 13, Fedora 43 and Arch Linux.
 
-[Unreleased]: https://github.com/hleroy/kation/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/hleroy/kation/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/hleroy/kation/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/hleroy/kation/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/hleroy/kation/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/hleroy/kation/compare/v0.1.0...v0.2.0
