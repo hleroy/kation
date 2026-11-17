@@ -195,20 +195,34 @@ async function createProtonBackend(config: Config, onEvent: (event: DriveEvent) 
         problem: drive.problem,
         account: {
             isLoggedIn: () => drive.auth.isLoggedIn(),
-            loadSession: () => drive.auth.loadSession(),
+            loadSession: async () => {
+                drive.renewSdk();
+                await drive.auth.loadSession();
+            },
             getEmail: async () => (await drive.addresses.getOwnPrimaryAddress()).email,
             getStorage: () => drive.getStorage(),
             authViaWeb: async (onSignInUrl, signal) => {
                 await drive.auth.authViaWeb(onSignInUrl, signal);
+                drive.renewSdk();
             },
             logout: () => drive.signOut(),
             onSessionChanged: (listener) => drive.onSessionChanged(listener),
         },
         startEvents: async () => {
-            drive.events.start();
-            // Changes inside "My files" arrive on its volume's event scope.
-            const root = await drive.sdk.getMyFilesRootFolder();
-            drive.events.addScope(root.treeEventScopeId);
+            // Changes inside "My files" arrive on its volume's event scope. Read it before
+            // polling: the stored scopes may be another account's, after a lost session.
+            // The session can end (sign-out, failed refresh) while the root is read: stopEvents then had nothing to stop.
+            const startPolling = () => {
+                if (drive.auth.isLoggedIn()) {
+                    drive.events.start();
+                }
+            };
+            const root = await drive.sdk.getMyFilesRootFolder().catch((error: unknown) => {
+                startPolling();
+                throw error;
+            });
+            startPolling();
+            await drive.events.followOnly(root.treeEventScopeId);
         },
         stopEvents: () => drive.events.stop(),
         // signOut (via logout) already cleared the SDK caches and event cursors.

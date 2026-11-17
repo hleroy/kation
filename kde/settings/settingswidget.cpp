@@ -342,9 +342,7 @@ void KationSettingsWidget::buildFoldersTab(QWidget *tab)
 {
     m_foldersHint->setObjectName(QStringLiteral("foldersHint"));
     m_folders->setObjectName(QStringLiteral("folders"));
-    m_foldersHint->setText(
-        i18n("Checked folders in “My files” are synced to this computer. Unchecked folders stay only in Proton Drive: "
-             "their files already on this computer are kept, and you can delete them to free space."));
+    showFoldersHint();
     m_folders->setHeaderHidden(true);
     m_folders->setRootIsDecorated(true);
     m_folders->setUniformRowHeights(true);
@@ -919,6 +917,13 @@ void KationSettingsWidget::loadFolderTree()
     loadChildren(nullptr, QStringLiteral("/"));
 }
 
+void KationSettingsWidget::showFoldersHint()
+{
+    m_foldersHint->setText(
+        i18n("Checked folders in “My files” are synced to this computer. Unchecked folders stay only in Proton Drive: "
+             "their files already on this computer are kept, and you can delete them to free space."));
+}
+
 void KationSettingsWidget::loadChildren(QTreeWidgetItem *parent, const QString &path)
 {
     if (parent) {
@@ -942,6 +947,8 @@ void KationSettingsWidget::loadChildren(QTreeWidgetItem *parent, const QString &
             m_foldersHint->setText(errorText(reply.error().message()));
             return;
         }
+        // An error shown earlier (another folder, the previous account) no longer applies.
+        showFoldersHint();
         QStringList names;
         for (const QVariantMap &entry : reply.value()) {
             if (entry.value(QStringLiteral("type")).toString() == QLatin1String("folder")) {

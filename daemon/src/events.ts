@@ -83,6 +83,25 @@ export class EventPoller {
         this.schedule(treeEventScopeId, 0);
     }
 
+    /**
+     * Follows this volume only, and forgets the cursors of the others: those of
+     * another account remain when its session was lost instead of signed out.
+     */
+    async followOnly(treeEventScopeId: string): Promise<void> {
+        if (!this.abort) {
+            return;
+        }
+        const dropped = [...this.scopes.keys()].filter((scopeId) => scopeId !== treeEventScopeId);
+        for (const scopeId of dropped) {
+            clearTimeout(this.scopes.get(scopeId)?.timer);
+            this.scopes.delete(scopeId);
+        }
+        this.addScope(treeEventScopeId);
+        for (const scopeId of dropped) {
+            await this.provider.removeScope('drive', scopeId);
+        }
+    }
+
     /** Stops polling and waits for running requests to end. Cursors are kept. */
     async stop(): Promise<void> {
         if (!this.abort) {
@@ -100,6 +119,12 @@ export class EventPoller {
     /** Stops polling and forgets the cursors (sign-out). */
     async clear(): Promise<void> {
         await this.stop();
+        // The persisted provider's clear() deletes its file but keeps the cursors in memory.
+        for (const { context, treeEventScopeIds } of this.provider.getInitialSubscriptionScopeIds()) {
+            for (const scopeId of treeEventScopeIds) {
+                await this.provider.removeScope(context, scopeId);
+            }
+        }
         await this.provider.clear();
     }
 
@@ -140,7 +165,8 @@ export class EventPoller {
     private async readEvents(scopeId: string, signal: AbortSignal): Promise<boolean> {
         const lastEventId = (await this.provider.getLatestEventId(scopeId)) ?? undefined;
         for await (const event of this.sdk.iterateEvents(scopeId, lastEventId, signal)) {
-            if (signal.aborted) {
+            // No longer followed (followOnly): do not store its cursor again.
+            if (signal.aborted || !this.scopes.has(scopeId)) {
                 return false;
             }
             if (event.type === DriveEventType.TreeRemove) {

@@ -283,6 +283,15 @@ void SettingsWidgetTest::foldersLimitsAndStartup()
     QTRY_COMPARE(syncStatus().value(u"excluded"_s).toStringList(), QStringList{u"/Videos"_s});
     screenshot(u"5-folders"_s);
 
+    // A listing error replaces the hint, until a later listing succeeds.
+    auto hint = m_window->findChild<QLabel *>(u"foldersHint"_s);
+    const QString hintText = hint->text();
+    drive.Trash(u"/Videos"_s).waitForFinished();
+    videos->setExpanded(true);
+    QTRY_VERIFY(hint->text() != hintText);
+    sub->setExpanded(true);
+    QTRY_COMPARE(hint->text(), hintText);
+
     // Speed limits and the tray at login.
     tabs->setCurrentIndex(2);
     m_window->findChild<QCheckBox *>(u"limitUpload"_s)->setChecked(true);
